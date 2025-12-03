@@ -43,7 +43,7 @@ size_t hamming_distance(std::vector<PauliRotation> const& rotations, size_t q1_i
 size_t cx_distance(std::vector<PauliRotation> const& rotations, size_t q1_idx, size_t q2_idx);
 size_t cx_distance(StabilizerTableau const& st, size_t q1_idx, size_t q2_idx);
 size_t delta_trace(StabilizerTableau const& st, size_t q1_idx, size_t q2_idx);
-dvlab::Digraph<size_t, int> get_dependency_graph(std::vector<PauliRotation> const& rotations);
+dvlab::Digraph<size_t, void> get_dependency_graph(std::vector<PauliRotation> const& rotations);
 dvlab::Digraph<size_t, int> get_parity_graph(std::vector<PauliRotation> const& rotations,
                                              PauliRotation const& target_rotation,
                                              bool consider_X = false);
