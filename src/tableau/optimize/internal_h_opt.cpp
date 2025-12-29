@@ -129,7 +129,7 @@ std::pair<Tableau, StabilizerTableau> minimize_hadamards(Tableau tableau, Stabil
             context.prepend(adjoint(op));
         });
 
-        std::string pauli_str = rotation.pauli_product().to_string();
+        std::string const pauli_str = rotation.pauli_product().to_string();
 
         implement_into_tableau(new_tableau, context, qubit, rotation.phase());
         std::ranges::for_each(adjoint(ops), [&context](CliffordOperator const& op) {

@@ -17,7 +17,7 @@
 
 namespace dvlab {
 
-Tabler::Tabler() : _cell_left_padding(0), _cell_right_padding(0), _left_margin(0) {}
+Tabler::Tabler() = default;
 
 size_t Tabler::_get_string_width(std::string_view str) const {
     return unicode::display_width(std::string(str));
