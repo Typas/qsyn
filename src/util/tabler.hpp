@@ -37,9 +37,9 @@ public:
 private:
     std::vector<std::vector<std::string>> _table;
     std::vector<size_t> _column_widths;
-    size_t _cell_left_padding;
-    size_t _cell_right_padding;
-    size_t _left_margin;
+    size_t _cell_left_padding{0};
+    size_t _cell_right_padding{0};
+    size_t _left_margin{0};
 
     size_t _get_string_width(std::string_view str) const;
 };
