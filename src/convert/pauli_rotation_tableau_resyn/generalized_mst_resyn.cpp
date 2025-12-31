@@ -1,9 +1,8 @@
 #include <algorithm>
-#include <chrono>
 #include <gsl/narrow>
-#include <iostream>
 #include <ranges>
 #include <stack>
+#include <unordered_set>
 #include <tl/adjacent.hpp>
 #include <tl/enumerate.hpp>
 #include <tl/to.hpp>
@@ -13,6 +12,7 @@
 #include "qcir/qcir.hpp"
 #include "tableau/stabilizer_tableau.hpp"
 #include "util/graph/digraph.hpp"
+#include "util/graph/dag_peeler.hpp"
 #include "util/graph/minimum_spanning_arborescence.hpp"
 #include "util/phase.hpp"
 #include "util/util.hpp"
@@ -87,10 +87,10 @@ size_t delta_trace(
 }
 
 // build the dependency graph according to the commutation relation
-dvlab::Digraph<size_t, void> get_dependency_graph(std::vector<PauliRotation> const& rotations) {
-    auto const t0              = std::chrono::steady_clock::now();
+dvlab::DagPeeler get_dependency_graph(std::vector<PauliRotation> const& rotations) {
     size_t const num_rotations = rotations.size();
-    dvlab::Digraph<size_t, void> dag{num_rotations};
+    dvlab::DagPeeler dag{num_rotations};
+    // Build graph: add edges
     for (auto i : std::views::iota(0ul, num_rotations)) {
         for (auto j : std::views::iota(i + 1, num_rotations)) {
             if (!is_commutative(rotations[i], rotations[j])) {
@@ -98,62 +98,78 @@ dvlab::Digraph<size_t, void> get_dependency_graph(std::vector<PauliRotation> con
             }
         }
     }
+    // Finalize: build in_adj and initialize queues
+    dag.finalize();
     return dag;
 }
 
 dvlab::Digraph<size_t, int> get_parity_graph_with_stabilizer(
     std::vector<PauliRotation> const& rotations,
     StabilizerTableau const& residual_clifford,
-    PauliRotation const& target_rotation,
-    std::chrono::microseconds::rep& get_delta_rotations_time_ref,
-    std::chrono::microseconds::rep& get_delta_stabilizer_time_ref,
-    std::chrono::microseconds::rep& creat_graph_time_ref) {
+    PauliRotation const& target_rotation) {
     assert(target_rotation.is_diagonal());
     auto const num_qubits = rotations.front().n_qubits();
 
     auto g         = dvlab::Digraph<size_t, int>{};
     auto qubit_vec = std::vector<size_t>{};
 
-    auto const creat_graph_time0 = std::chrono::steady_clock::now();
     for (auto i : std::views::iota(0ul, num_qubits)) {
         if (target_rotation.pauli_product().is_z_set(i)) {
             g.add_vertex_with_id(i);
             qubit_vec.push_back(i);
         }
     }
-    auto const creat_graph_time1 = std::chrono::steady_clock::now();
-    creat_graph_time_ref += std::chrono::duration_cast<std::chrono::microseconds>(creat_graph_time1 - creat_graph_time0).count();
+
+    // Optimization: Pre-compute all row_hamming_weights to avoid repeated calculations
+    // For each qubit in qubit_vec, compute both is_Z=true and is_Z=false weights
+    std::vector<size_t> hamming_weight_z_true(qubit_vec.size());
+    std::vector<size_t> hamming_weight_z_false(qubit_vec.size());
+    for (size_t idx = 0; idx < qubit_vec.size(); ++idx) {
+        auto q = qubit_vec[idx];
+        hamming_weight_z_true[idx]  = row_hamming_weight(rotations, q, true);
+        hamming_weight_z_false[idx] = row_hamming_weight(rotations, q, false);
+    }
+
+    // Create a map from qubit index to position in qubit_vec for O(1) lookup
+    std::unordered_map<size_t, size_t> qubit_to_idx;
+    for (size_t idx = 0; idx < qubit_vec.size(); ++idx) {
+        qubit_to_idx[qubit_vec[idx]] = idx;
+    }
 
     auto get_delta_rotations = [&](size_t i, size_t j) -> std::pair<size_t, size_t> {
-        size_t W_i     = row_hamming_weight(rotations, i, true) + row_hamming_weight(rotations, j, false);
-        size_t W_j     = row_hamming_weight(rotations, j, true) + row_hamming_weight(rotations, i, false);
-        size_t Dist_ij = cx_distance(rotations, i, j);
+        auto i_idx = qubit_to_idx[i];
+        auto j_idx = qubit_to_idx[j];
+        auto W_i   = hamming_weight_z_true[i_idx] + hamming_weight_z_false[j_idx];
+        auto W_j   = hamming_weight_z_true[j_idx] + hamming_weight_z_false[i_idx];
+        auto Dist_ij = cx_distance(rotations, i, j);
         return {Dist_ij - W_j - 1, Dist_ij - W_i - 1};
     };
 
+    // Optimization: Pre-compute all row_hamming_weights for stabilizer as well
+    std::vector<size_t> stab_hamming_weight_z_true(qubit_vec.size());
+    std::vector<size_t> stab_hamming_weight_z_false(qubit_vec.size());
+    for (size_t idx = 0; idx < qubit_vec.size(); ++idx) {
+        auto q = qubit_vec[idx];
+        stab_hamming_weight_z_true[idx]  = row_hamming_weight(residual_clifford, q, true);
+        stab_hamming_weight_z_false[idx] = row_hamming_weight(residual_clifford, q, false);
+    }
+
     auto get_delta_stabilizer = [&](size_t i, size_t j) -> std::pair<size_t, size_t> {
-        size_t W_i     = row_hamming_weight(residual_clifford, i, true) + row_hamming_weight(residual_clifford, j, false);
-        size_t W_j     = row_hamming_weight(residual_clifford, j, true) + row_hamming_weight(residual_clifford, i, false);
-        size_t Dist_ij = cx_distance(residual_clifford, i, j);
-        size_t T_ij    = delta_trace(residual_clifford, i, j);
-        size_t T_ji    = delta_trace(residual_clifford, j, i);
+        auto i_idx = qubit_to_idx[i];
+        auto j_idx = qubit_to_idx[j];
+        auto W_i   = stab_hamming_weight_z_true[i_idx] + stab_hamming_weight_z_false[j_idx];
+        auto W_j   = stab_hamming_weight_z_true[j_idx] + stab_hamming_weight_z_false[i_idx];
+        auto Dist_ij = cx_distance(residual_clifford, i, j);
+        auto T_ij    = delta_trace(residual_clifford, i, j);
+        auto T_ji    = delta_trace(residual_clifford, j, i);
         return {Dist_ij - W_j - 1 - 2 * T_ij, Dist_ij - W_i - 1 - 2 * T_ji};
     };
 
     for (auto const& [i, j] : dvlab::combinations<2>(qubit_vec)) {
-        auto const get_delta_rotations_time0 = std::chrono::steady_clock::now();
         auto const [delta_rot_i, delta_rot_j]   = get_delta_rotations(i, j);
-        auto const get_delta_rotations_time1 = std::chrono::steady_clock::now();
-        get_delta_rotations_time_ref += std::chrono::duration_cast<std::chrono::microseconds>(get_delta_rotations_time1 - get_delta_rotations_time0).count();
-        auto const get_delta_stabilizer_time0 = std::chrono::steady_clock::now();
         auto const [delta_stab_i, delta_stab_j] = get_delta_stabilizer(i, j);
-        auto const get_delta_stabilizer_time1 = std::chrono::steady_clock::now();
-        get_delta_stabilizer_time_ref += std::chrono::duration_cast<std::chrono::microseconds>(get_delta_stabilizer_time1 - get_delta_stabilizer_time0).count();
-        auto const creat_graph_time0 = std::chrono::steady_clock::now();
         g.add_edge(i, j, delta_rot_i + delta_stab_i);
         g.add_edge(j, i, delta_rot_j + delta_stab_j);
-        auto const creat_graph_time1 = std::chrono::steady_clock::now();
-        creat_graph_time_ref += std::chrono::duration_cast<std::chrono::microseconds>(creat_graph_time1 - creat_graph_time0).count();
     }
 
     return g;
@@ -217,53 +233,32 @@ GeneralizedMstSynthesisStrategy::_partial_synthesize(
         return qcir::QCir{num_qubits};
     }
 
-    // record the total time of each function
-    using microseconds_count = std::chrono::microseconds::rep;
-    microseconds_count create_dag_time = 0;
-    microseconds_count first_layer_time = 0;
-    microseconds_count get_best_rotation_idx_time = 0;
-    microseconds_count apply_mst_cxs_time = 0;
-    microseconds_count erase_and_append_gates_time = 0;
-    microseconds_count parity_graph_time = 0;
-    microseconds_count get_delta_rotations_time = 0;
-    microseconds_count get_delta_stabilizer_time = 0;
-    microseconds_count creat_graph_time = 0;
-    microseconds_count mst_time = 0;
-    microseconds_count remove_vertex_time = 0;
-
     auto copy_rotations = rotations;
     auto qcir           = qcir::QCir{num_qubits};
-    auto const create_dag_time0 = std::chrono::steady_clock::now();
     auto dag            = detail::mst::get_dependency_graph(rotations);
-    auto const create_dag_time1 = std::chrono::steady_clock::now();
-    create_dag_time = std::chrono::duration_cast<std::chrono::microseconds>(create_dag_time1 - create_dag_time0).count();
-    // create the index mapping
-    std::vector<size_t> index_mapping(num_rotations);  // col_idx -> vertex_idx
+    // create the index mapping: rotation_idx -> vertex_id
+    std::vector<size_t> index_mapping(num_rotations);
+    // create reverse mapping: vertex_id -> rotation_idx
+    std::vector<size_t> vertex_to_rotation(num_rotations);
     for (size_t i = 0; i < num_rotations; ++i) {
         index_mapping[i] = i;
+        vertex_to_rotation[i] = i;
     }
     while (!copy_rotations.empty()) {
         if (stop_requested()) break;
         std::vector<size_t> first_layer_rotations;
-        // record the time
-        auto const first_layer_time0 = std::chrono::steady_clock::now();
-        for (auto i : std::views::iota(0ul, copy_rotations.size())) {
-            if (backward) {
-                if (dag.out_degree(index_mapping[i]) == 0) {
-                    first_layer_rotations.push_back(i);
-                }
-            } else {
-                if (dag.in_degree(index_mapping[i]) == 0) {
-                    first_layer_rotations.push_back(i);
+        // Use optimized get_first_layer/get_last_layer methods
+        std::vector<size_t> layer_vertices = backward ? dag.get_last_layer() : dag.get_first_layer();
+        for (auto vid : layer_vertices) {
+            if (vid < vertex_to_rotation.size()) {
+                size_t rot_idx = vertex_to_rotation[vid];
+                // Check if this rotation index is still valid (not yet removed)
+                if (rot_idx < copy_rotations.size() && index_mapping[rot_idx] == vid) {
+                    first_layer_rotations.push_back(rot_idx);
                 }
             }
         }
-        auto const first_layer_time1 = std::chrono::steady_clock::now();
-        first_layer_time += std::chrono::duration_cast<std::chrono::microseconds>(first_layer_time1 - first_layer_time0).count();
-        auto const get_best_rotation_idx_time0 = std::chrono::steady_clock::now();
         auto const best_rotation_idx = detail::mst::get_best_rotation_idx(copy_rotations, first_layer_rotations);
-        auto const get_best_rotation_idx_time1 = std::chrono::steady_clock::now();
-        get_best_rotation_idx_time += std::chrono::duration_cast<std::chrono::microseconds>(get_best_rotation_idx_time1 - get_best_rotation_idx_time0).count();
         size_t best_vid              = index_mapping[best_rotation_idx];
         auto best_rotation           = copy_rotations[best_rotation_idx];
         for (auto i : std::views::iota(0ul, num_qubits)) {
@@ -277,49 +272,40 @@ GeneralizedMstSynthesisStrategy::_partial_synthesize(
         // Update the best rotation
         best_rotation = copy_rotations[best_rotation_idx];
         assert(best_rotation.is_diagonal());
-        auto const remove_vertex_time0 = std::chrono::steady_clock::now();
-        dag.remove_vertex(best_vid);
-        index_mapping.erase(index_mapping.begin() + best_rotation_idx);
-        auto const remove_vertex_time1 = std::chrono::steady_clock::now();
-        remove_vertex_time += std::chrono::duration_cast<std::chrono::microseconds>(remove_vertex_time1 - remove_vertex_time0).count();
-        // auto const parity_graph = detail::mst::get_parity_graph(copy_rotations, best_rotation, "qubit_hamming_weight");
-        auto const parity_graph_time0 = std::chrono::steady_clock::now();
-        auto const parity_graph = detail::mst::get_parity_graph_with_stabilizer(copy_rotations, residual_clifford, best_rotation, get_delta_rotations_time, get_delta_stabilizer_time, creat_graph_time);
-        auto const parity_graph_time1 = std::chrono::steady_clock::now();
-        parity_graph_time += std::chrono::duration_cast<std::chrono::microseconds>(parity_graph_time1 - parity_graph_time0).count();
-        auto const mst_time0 = std::chrono::steady_clock::now();
+        dag.erase(best_vid);
+        // Use swap-and-pop for O(1) deletion instead of O(n) erase
+        // Swap the last element to the position being removed
+        size_t last_idx = copy_rotations.size() - 1;
+        if (best_rotation_idx != last_idx) {
+            // Update reverse mapping for the swapped element
+            size_t swapped_vid = index_mapping[last_idx];
+            vertex_to_rotation[swapped_vid] = best_rotation_idx;
+            // Swap index_mapping
+            index_mapping[best_rotation_idx] = index_mapping[last_idx];
+        }
+        // Remove last element from index_mapping (O(1))
+        index_mapping.pop_back();
+        auto const parity_graph = detail::mst::get_parity_graph_with_stabilizer(copy_rotations, residual_clifford, best_rotation);
         auto const [mst, root] = dvlab::minimum_spanning_arborescence(parity_graph);
-        auto const mst_time1 = std::chrono::steady_clock::now();
-        mst_time += std::chrono::duration_cast<std::chrono::microseconds>(mst_time1 - mst_time0).count();
-        auto const apply_mst_cxs_time0 = std::chrono::steady_clock::now();
         detail::mst::apply_mst_cxs(mst, root, copy_rotations, qcir, residual_clifford, backward);
-        auto const apply_mst_cxs_time1 = std::chrono::steady_clock::now();
-        apply_mst_cxs_time += std::chrono::duration_cast<std::chrono::microseconds>(apply_mst_cxs_time1 - apply_mst_cxs_time0).count();
 
         assert(detail::mst::is_valid(copy_rotations[best_rotation_idx]));
 
-        auto const erase_and_append_gates_time0 = std::chrono::steady_clock::now();
-        copy_rotations.erase(copy_rotations.begin() + best_rotation_idx);
+        // Use swap-and-pop for O(1) deletion instead of O(n) erase
+        size_t last_rot_idx = copy_rotations.size() - 1;
+        if (best_rotation_idx != last_rot_idx) {
+            // Swap the last element to the position being removed
+            std::swap(copy_rotations[best_rotation_idx], copy_rotations[last_rot_idx]);
+        }
+        // Remove last element (O(1))
+        copy_rotations.pop_back();
         if (backward) {
             qcir.prepend(qcir::PZGate(best_rotation.phase()), {root});
         } else {
             qcir.append(qcir::PZGate(best_rotation.phase()), {root});
         }
-        auto const erase_and_append_gates_time1 = std::chrono::steady_clock::now();
-        erase_and_append_gates_time += std::chrono::duration_cast<std::chrono::microseconds>(erase_and_append_gates_time1 - erase_and_append_gates_time0).count();
     }
 
-    std::cout << "[Timer] create_dag_time: " << create_dag_time << "μs" << std::endl;
-    std::cout << "[Timer] first_layer_time: " << first_layer_time << "μs" << std::endl;
-    std::cout << "[Timer] get_best_rotation_idx_time: " << get_best_rotation_idx_time << "μs" << std::endl;
-    std::cout << "[Timer] apply_mst_cxs_time: " << apply_mst_cxs_time << "μs" << std::endl;
-    std::cout << "[Timer] erase_and_append_gates_time: " << erase_and_append_gates_time << "μs" << std::endl;
-    std::cout << "[Timer] parity_graph_time: " << parity_graph_time << "μs" << std::endl;
-    std::cout << "         get_delta_rotations_time: " << get_delta_rotations_time << "μs" << std::endl;
-    std::cout << "         get_delta_stabilizer_time: " << get_delta_stabilizer_time << "μs" << std::endl;
-    std::cout << "         creat_graph_time: " << creat_graph_time << "μs" << std::endl;
-    std::cout << "[Timer] mst_time: " << mst_time << "μs" << std::endl;
-    std::cout << "[Timer] remove_vertex_time: " << remove_vertex_time << "μs" << std::endl;
     return qcir;
 }
 
