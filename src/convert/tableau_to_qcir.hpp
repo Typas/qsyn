@@ -14,8 +14,8 @@
 #include "tableau/pauli_rotation.hpp"
 #include "tableau/stabilizer_tableau.hpp"
 #include "tableau/tableau.hpp"
-#include "util/graph/digraph.hpp"
 #include "util/graph/dag_peeler.hpp"
+#include "util/graph/digraph.hpp"
 
 namespace qsyn {
 

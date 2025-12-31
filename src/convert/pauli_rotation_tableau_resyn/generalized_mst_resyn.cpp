@@ -2,17 +2,17 @@
 #include <gsl/narrow>
 #include <ranges>
 #include <stack>
-#include <unordered_set>
 #include <tl/adjacent.hpp>
 #include <tl/enumerate.hpp>
 #include <tl/to.hpp>
+#include <unordered_set>
 
 #include "convert/tableau_to_qcir.hpp"
 #include "qcir/basic_gate_type.hpp"
 #include "qcir/qcir.hpp"
 #include "tableau/stabilizer_tableau.hpp"
-#include "util/graph/digraph.hpp"
 #include "util/graph/dag_peeler.hpp"
+#include "util/graph/digraph.hpp"
 #include "util/graph/minimum_spanning_arborescence.hpp"
 #include "util/phase.hpp"
 #include "util/util.hpp"
@@ -125,7 +125,7 @@ dvlab::Digraph<size_t, int> get_parity_graph_with_stabilizer(
     std::vector<size_t> hamming_weight_z_true(qubit_vec.size());
     std::vector<size_t> hamming_weight_z_false(qubit_vec.size());
     for (size_t idx = 0; idx < qubit_vec.size(); ++idx) {
-        auto q = qubit_vec[idx];
+        auto q                      = qubit_vec[idx];
         hamming_weight_z_true[idx]  = row_hamming_weight(rotations, q, true);
         hamming_weight_z_false[idx] = row_hamming_weight(rotations, q, false);
     }
@@ -137,10 +137,10 @@ dvlab::Digraph<size_t, int> get_parity_graph_with_stabilizer(
     }
 
     auto get_delta_rotations = [&](size_t i, size_t j) -> std::pair<size_t, size_t> {
-        auto i_idx = qubit_to_idx[i];
-        auto j_idx = qubit_to_idx[j];
-        auto W_i   = hamming_weight_z_true[i_idx] + hamming_weight_z_false[j_idx];
-        auto W_j   = hamming_weight_z_true[j_idx] + hamming_weight_z_false[i_idx];
+        auto i_idx   = qubit_to_idx[i];
+        auto j_idx   = qubit_to_idx[j];
+        auto W_i     = hamming_weight_z_true[i_idx] + hamming_weight_z_false[j_idx];
+        auto W_j     = hamming_weight_z_true[j_idx] + hamming_weight_z_false[i_idx];
         auto Dist_ij = cx_distance(rotations, i, j);
         return {Dist_ij - W_j - 1, Dist_ij - W_i - 1};
     };
@@ -149,16 +149,16 @@ dvlab::Digraph<size_t, int> get_parity_graph_with_stabilizer(
     std::vector<size_t> stab_hamming_weight_z_true(qubit_vec.size());
     std::vector<size_t> stab_hamming_weight_z_false(qubit_vec.size());
     for (size_t idx = 0; idx < qubit_vec.size(); ++idx) {
-        auto q = qubit_vec[idx];
+        auto q                           = qubit_vec[idx];
         stab_hamming_weight_z_true[idx]  = row_hamming_weight(residual_clifford, q, true);
         stab_hamming_weight_z_false[idx] = row_hamming_weight(residual_clifford, q, false);
     }
 
     auto get_delta_stabilizer = [&](size_t i, size_t j) -> std::pair<size_t, size_t> {
-        auto i_idx = qubit_to_idx[i];
-        auto j_idx = qubit_to_idx[j];
-        auto W_i   = stab_hamming_weight_z_true[i_idx] + stab_hamming_weight_z_false[j_idx];
-        auto W_j   = stab_hamming_weight_z_true[j_idx] + stab_hamming_weight_z_false[i_idx];
+        auto i_idx   = qubit_to_idx[i];
+        auto j_idx   = qubit_to_idx[j];
+        auto W_i     = stab_hamming_weight_z_true[i_idx] + stab_hamming_weight_z_false[j_idx];
+        auto W_j     = stab_hamming_weight_z_true[j_idx] + stab_hamming_weight_z_false[i_idx];
         auto Dist_ij = cx_distance(residual_clifford, i, j);
         auto T_ij    = delta_trace(residual_clifford, i, j);
         auto T_ji    = delta_trace(residual_clifford, j, i);
@@ -241,7 +241,7 @@ GeneralizedMstSynthesisStrategy::_partial_synthesize(
     // create reverse mapping: vertex_id -> rotation_idx
     std::vector<size_t> vertex_to_rotation(num_rotations);
     for (size_t i = 0; i < num_rotations; ++i) {
-        index_mapping[i] = i;
+        index_mapping[i]      = i;
         vertex_to_rotation[i] = i;
     }
     while (!copy_rotations.empty()) {
@@ -278,7 +278,7 @@ GeneralizedMstSynthesisStrategy::_partial_synthesize(
         size_t last_idx = copy_rotations.size() - 1;
         if (best_rotation_idx != last_idx) {
             // Update reverse mapping for the swapped element
-            size_t swapped_vid = index_mapping[last_idx];
+            size_t swapped_vid              = index_mapping[last_idx];
             vertex_to_rotation[swapped_vid] = best_rotation_idx;
             // Swap index_mapping
             index_mapping[best_rotation_idx] = index_mapping[last_idx];
@@ -286,7 +286,7 @@ GeneralizedMstSynthesisStrategy::_partial_synthesize(
         // Remove last element from index_mapping (O(1))
         index_mapping.pop_back();
         auto const parity_graph = detail::mst::get_parity_graph_with_stabilizer(copy_rotations, residual_clifford, best_rotation);
-        auto const [mst, root] = dvlab::minimum_spanning_arborescence(parity_graph);
+        auto const [mst, root]  = dvlab::minimum_spanning_arborescence(parity_graph);
         detail::mst::apply_mst_cxs(mst, root, copy_rotations, qcir, residual_clifford, backward);
 
         assert(detail::mst::is_valid(copy_rotations[best_rotation_idx]));

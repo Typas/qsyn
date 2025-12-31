@@ -1,21 +1,21 @@
 #pragma once
 
-#include <cstddef>
-#include <vector>
-#include <deque>
 #include <cassert>
+#include <cstddef>
+#include <deque>
+#include <vector>
 
 namespace dvlab {
 
 /**
  * @brief High-performance DAG peeler optimized for repeated layer extraction and vertex removal
- * 
+ *
  * Uses vector-based adjacency lists with lazy deletion for maximum performance.
  * Maintain queues of degree-0 vertices for O(1) layer access
  */
 class DagPeeler {
 public:
-    using Vertex = std::size_t;
+    using Vertex                 = std::size_t;
     static constexpr Vertex npos = static_cast<Vertex>(-1);
 
     /**
@@ -187,7 +187,7 @@ public:
         }
 
         // Clear degrees for tidiness
-        in_deg[v] = 0;
+        in_deg[v]  = 0;
         out_deg[v] = 0;
     }
 
@@ -215,15 +215,14 @@ public:
 private:
     std::size_t _n;
     std::vector<std::vector<Vertex>> out_adj;  // Outgoing adjacency list
-    std::vector<std::vector<Vertex>> in_adj;    // Incoming adjacency list
-    std::vector<std::size_t> in_deg;            // In-degree for each vertex
-    std::vector<std::size_t> out_deg;           // Out-degree for each vertex
-    std::vector<bool> alive;                     // Whether vertex is still alive
-    std::size_t _alive_cnt;                      // Number of alive vertices
+    std::vector<std::vector<Vertex>> in_adj;   // Incoming adjacency list
+    std::vector<std::size_t> in_deg;           // In-degree for each vertex
+    std::vector<std::size_t> out_deg;          // Out-degree for each vertex
+    std::vector<bool> alive;                   // Whether vertex is still alive
+    std::size_t _alive_cnt;                    // Number of alive vertices
 
     std::deque<Vertex> first_q;  // Queue of vertices with in_deg == 0
     std::deque<Vertex> last_q;   // Queue of vertices with out_deg == 0
 };
 
 }  // namespace dvlab
-

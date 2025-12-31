@@ -113,7 +113,7 @@ public:
             }
             _out_neighbors.erase(out_it);
         }
-        
+
         auto in_it = _in_neighbors.find(v);
         if (in_it != _in_neighbors.end()) {
             for (auto src : in_it->second) {
@@ -137,9 +137,9 @@ public:
     add_edge(Vertex src, Vertex dst) {
         _out_neighbors[src].insert(dst);
         _in_neighbors[dst].insert(src);
-        
+
         if constexpr (has_edge_attr) {
-            Edge e = {src, dst};
+            Edge e              = {src, dst};
             _edge_attributes[e] = EdgeAttr{};
             return e;
         } else {
@@ -154,11 +154,10 @@ public:
     }
 
     // add_edge(src, dst, attr) with attribute
-    template<typename EA = EdgeAttr>
+    template <typename EA = EdgeAttr>
     auto add_edge(Vertex src, Vertex dst, EA const& attr)
-        -> std::enable_if_t<has_edge_attr && !std::is_same_v<EA, void>, Edge>
-    {
-        Edge e              = {src, dst};
+        -> std::enable_if_t<has_edge_attr && !std::is_same_v<EA, void>, Edge> {
+        Edge e = {src, dst};
         _out_neighbors[src].insert(dst);
         _in_neighbors[dst].insert(src);
         _edge_attributes[e] = attr;
@@ -166,10 +165,9 @@ public:
     }
 
     // add_edge(Edge e, attr) with attribute
-    template<typename EA = EdgeAttr>
+    template <typename EA = EdgeAttr>
     auto add_edge(Edge e, EA const& attr)
-        -> std::enable_if_t<has_edge_attr && !std::is_same_v<EA, void>, Edge>
-    {
+        -> std::enable_if_t<has_edge_attr && !std::is_same_v<EA, void>, Edge> {
         return add_edge(e.src, e.dst, attr);
     }
 
@@ -274,26 +272,26 @@ public:
         return vertex_attr(v);
     }
 
-    template<typename T = EdgeAttr>
-    requires (has_edge_attr && !std::is_void_v<T>)
+    template <typename T = EdgeAttr>
+    requires(has_edge_attr && !std::is_void_v<T>)
     T const& edge_attr(Edge e) const {
         return _edge_attributes.at(e);
     }
 
-    template<typename T = EdgeAttr>
-    requires (has_edge_attr && !std::is_void_v<T>)
+    template <typename T = EdgeAttr>
+    requires(has_edge_attr && !std::is_void_v<T>)
     T& edge_attr(Edge e) {
         return _edge_attributes.at(e);
     }
 
-    template<typename T = EdgeAttr>
-    requires (has_edge_attr && !std::is_void_v<T>)
+    template <typename T = EdgeAttr>
+    requires(has_edge_attr && !std::is_void_v<T>)
     T const& operator[](Edge e) const {
         return edge_attr(e);
     }
 
-    template<typename T = EdgeAttr>
-    requires (has_edge_attr && !std::is_void_v<T>)
+    template <typename T = EdgeAttr>
+    requires(has_edge_attr && !std::is_void_v<T>)
     T& operator[](Edge e) {
         return edge_attr(e);
     }
