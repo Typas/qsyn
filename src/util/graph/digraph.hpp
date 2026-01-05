@@ -307,10 +307,12 @@ public:
             }
         }
 
-        for (auto e : edges()) {
-            if (!other.has_edge(e)) return false;
-            if constexpr (has_edge_attr) {
-                if (edge_attr(e) != other.edge_attr(e)) return false;
+        for (auto const& v : vertices()) {
+            for (auto const& e : out_edges(v)) {
+                if (!other.has_edge(e)) return false;
+                if constexpr (has_edge_attr) {
+                    if (edge_attr(e) != other.edge_attr(e)) return false;
+                }
             }
         }
         return true;
