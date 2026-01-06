@@ -71,9 +71,6 @@ QCir::QCir(QCir const& other) {
                              other.get_gates() |
                              views::transform(
                                  [](QCirGate* g) { return g->get_id(); }));
-
-    this->set_filename(other._filename);
-    this->add_procedures(other._procedures);
 }
 /**
  * @brief Get Gate.

@@ -140,8 +140,6 @@ public:
 
     void release() {
         _next_v_id = 0;
-        _filename  = "";
-        _procedures.clear();
         _inputs.clear();
         _outputs.clear();
         _vertices.clear();
@@ -152,8 +150,6 @@ public:
 
     void swap(ZXGraph& other) noexcept {
         std::swap(_next_v_id, other._next_v_id);
-        std::swap(_filename, other._filename);
-        std::swap(_procedures, other._procedures);
         std::swap(_inputs, other._inputs);
         std::swap(_outputs, other._outputs);
         std::swap(_vertices, other._vertices);
@@ -194,19 +190,6 @@ public:
     size_t num_outputs() const { return get_outputs().size(); }
     size_t num_vertices() const { return get_vertices().size(); }
     size_t num_neighbors(ZXVertex* v) const { return v->_neighbors.size(); }
-
-    // file and procedure related functions
-    // may be moved to manager class in the future
-    void set_filename(std::string const& f) { _filename = f; }
-    void add_procedures(std::vector<std::string> const& ps) {
-        _procedures.insert(std::end(_procedures), std::begin(ps), std::end(ps));
-    }
-    void add_procedure(std::string_view p) { _procedures.emplace_back(p); }
-
-    std::string get_filename() const { return _filename; }
-    std::vector<std::string> const& get_procedures() const {
-        return _procedures;
-    }
 
     // attributes
     bool is_neighbor(ZXVertex* v1, ZXVertex* v2) const {
@@ -377,8 +360,6 @@ public:
 
 private:
     mutable size_t _next_v_id = 0;
-    std::string _filename;
-    std::vector<std::string> _procedures;
     ZXVertexList _inputs;
     ZXVertexList _outputs;
     ZXVertexList _vertices;
