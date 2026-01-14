@@ -12,6 +12,11 @@ set(CMAKE_CXX_FLAGS "")
 set(CMAKE_CXX_FLAGS_DEBUG "-g")
 set(CMAKE_CXX_FLAGS_RELEASE "-O3")
 
+# Set BLA_VENDOR before project() so it's available during initialization
+# Use CACHE so it persists across build directories (release vs debug)
+set(BLA_VENDOR OpenBLAS CACHE STRING "BLAS vendor to search for")
+set(BLA_PREFER_PKGCONFIG ON CACHE BOOL "Prefer pkg-config for BLAS")
+
 include(FetchContent)
 include(CheckCXXCompilerFlag)
 set(FETCHCONTENT_UPDATES_DISCONNECTED TRUE)
@@ -84,7 +89,6 @@ include(scripts/cmake/target_link_libraries_system.cmake)
 
 # find_package(OpenMP REQUIRED)
 
-set(BLA_VENDER OpenBLAS)
 find_package(BLAS REQUIRED)
 find_package(LAPACK REQUIRED)
 
