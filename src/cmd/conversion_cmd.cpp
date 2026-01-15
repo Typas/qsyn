@@ -340,9 +340,9 @@ Command convert_from_tableau_cmd(tableau::TableauMgr& tableau_mgr, qcir::QCirMgr
 
                 if (qcir.has_value()) {
                     qcir_mgr.add(qcir_mgr.get_next_id(), std::make_unique<qcir::QCir>(std::move(qcir.value())));
-                    qcir_mgr.get()->set_filename(tableau_mgr.get()->get_filename());
-                    qcir_mgr.get()->add_procedures(tableau_mgr.get()->get_procedures());
-                    qcir_mgr.get()->add_procedure("TABL2QC");
+                    qcir_mgr.set_filename(tableau_mgr.get_filename());
+                    qcir_mgr.add_procedures(tableau_mgr.get_procedures());
+                    qcir_mgr.add_procedure("TABL2QC");
                 }
 
                 return CmdExecResult::done;
