@@ -1,4 +1,5 @@
 UNAME_S := $(shell uname -s)
+ARGS := "" # rules can use this variable to pass arguments to other scripts
 
 # On MacOS, the default compiler is clang
 ifeq ($(UNAME_S), Darwin)
@@ -93,7 +94,7 @@ test-update:
 
 # run clang-format and clang-tidy on the source code
 lint:
-	./scripts/LINT
+	./scripts/LINT $(ARGS)
 .PHONY: lint
 
 clean:

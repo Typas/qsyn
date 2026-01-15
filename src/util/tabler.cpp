@@ -20,7 +20,11 @@ namespace dvlab {
 Tabler::Tabler() = default;
 
 size_t Tabler::_get_string_width(std::string_view str) const {
-    return unicode::display_width(std::string(str));
+    int const width = unicode::display_width(std::string(str));
+    // display_width can return -1 on error, which when cast to size_t
+    // becomes SIZE_MAX This would break table formatting,
+    // so we treat errors as 0 width
+    return width < 0 ? 0 : static_cast<size_t>(width);
 }
 
 size_t Tabler::n_columns() const {
