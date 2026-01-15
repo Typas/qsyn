@@ -231,21 +231,19 @@ Command convert_from_tableau_cmd(tableau::TableauMgr& tableau_mgr, qcir::QCirMgr
                                .description("convert from Tableau to QCir");
 
             to_qcir.add_argument<std::string>("-c", "--clifford")
-                .constraint(choices_allow_prefix({"hopt", "ag", "hstair"}))
+                .constraint(choices_allow_prefix({"hopt", "ag", "hstair", "ag+"}))
                 .default_value("hopt")
                 .help("specify the Clifford synthesis strategy (default: hopt).");
 
             to_qcir.add_argument<std::string>("-r", "--rotation")
-                .constraint(choices_allow_prefix({"naive", "graysynth", "gstair", "mst"}))
+                .constraint(choices_allow_prefix({"naive", "basic", "graysynth", "gstair", "mst", "pmst"}))
                 .default_value("naive")
                 .help("specify the rotation synthesis strategy (default: naive).");
 
-            to_qcir.add_argument<bool>("-l", "--lazy")
-                .action(store_true)
-                .help(
-                    "If set, only partially synthesize subtableau "
-                    "so that the remaining can be delayed to later. "
-                    "Note that not all strategies support lazy synthesis.");
+            to_qcir.add_argument<std::string>("-s", "--synthesis-type")
+                .constraint(choices_allow_prefix({"eager", "lazy", "unified"}))
+                .default_value("eager")
+                .help("specify the synthesis type (default: eager).");
         },
         [&](ArgumentParser const& parser) {
             using namespace dvlab::str;
@@ -253,13 +251,13 @@ Command convert_from_tableau_cmd(tableau::TableauMgr& tableau_mgr, qcir::QCirMgr
             if (!dvlab::utils::mgr_has_data(tableau_mgr)) return CmdExecResult::error;
             auto to_type = parser.get<std::string>("to-type");
             if (to_type == "qcir") {
-                auto const lazy                  = parser.parsed("--lazy");
+                auto const synthesis_type_str    = parser.get<std::string>("--synthesis-type");
                 auto const clifford_strategy_str = parser.get<std::string>("--clifford");
                 auto const rotation_strategy_str = parser.get<std::string>("--rotation");
 
                 // lazy synthesis requires hopt/hstair for Clifford synthesis
                 // and gray/gstair/mst for rotation synthesis
-                if (lazy) {
+                if (is_prefix_of(synthesis_type_str, "lazy")) {
                     if (!is_prefix_of(clifford_strategy_str, "hopt") &&
                         !is_prefix_of(clifford_strategy_str, "hstair")) {
                         spdlog::error("Lazy synthesis requires hopt/hstair for Clifford synthesis!!");
@@ -270,6 +268,14 @@ Command convert_from_tableau_cmd(tableau::TableauMgr& tableau_mgr, qcir::QCirMgr
                         !is_prefix_of(rotation_strategy_str, "gstair") &&
                         !is_prefix_of(rotation_strategy_str, "mst")) {
                         spdlog::error("Lazy synthesis requires graysynth/gstair/mst for rotation synthesis!!");
+                        return CmdExecResult::error;
+                    }
+                }
+
+                if (is_prefix_of(synthesis_type_str, "unified")) {
+                    if (!is_prefix_of(rotation_strategy_str, "pmst") &&
+                        !is_prefix_of(rotation_strategy_str, "basic")) {
+                        spdlog::error("Unified synthesis requires pmst/basic for rotation synthesis!!");
                         return CmdExecResult::error;
                     }
                 }
@@ -285,6 +291,8 @@ Command convert_from_tableau_cmd(tableau::TableauMgr& tableau_mgr, qcir::QCirMgr
                         if (is_prefix_of(clifford_strategy_str, "hstair"))
                             return std::make_unique<
                                 HOptSynthesisStrategy>(HOptMode::staircase);
+                        if (is_prefix_of(clifford_strategy_str, "ag+"))
+                            return std::make_unique<AGSynthesisStrategy>(AGSynthesisStrategy::Mode::ag_plus);
                         DVLAB_UNREACHABLE("Invalid clifford strategy!!");
                         return nullptr;
                     });
@@ -295,6 +303,9 @@ Command convert_from_tableau_cmd(tableau::TableauMgr& tableau_mgr, qcir::QCirMgr
                         if (is_prefix_of(rotation_strategy_str, "naive"))
                             return std::make_unique<
                                 NaivePauliRotationsSynthesisStrategy>();
+                        if (is_prefix_of(rotation_strategy_str, "basic"))
+                            return std::make_unique<
+                                BasicPauliRotationsSynthesisStrategy>();
                         if (is_prefix_of(rotation_strategy_str, "graysynth"))
                             return std::make_unique<GraySynthStrategy>();
                         if (is_prefix_of(rotation_strategy_str, "gstair"))
@@ -302,8 +313,22 @@ Command convert_from_tableau_cmd(tableau::TableauMgr& tableau_mgr, qcir::QCirMgr
                                 GraySynthStrategy>(GrayMode::staircase);
                         if (is_prefix_of(rotation_strategy_str, "mst"))
                             return std::make_unique<MstSynthesisStrategy>();
+                        if (is_prefix_of(rotation_strategy_str, "pmst"))
+                            return std::make_unique<GeneralizedMstSynthesisStrategy>();
                         DVLAB_UNREACHABLE("Invalid rotation strategy!!");
                         return nullptr;
+                    });
+
+                auto const synthesis_type = std::invoke(
+                    [&]() -> SynthesisType {
+                        if (synthesis_type_str == "eager")
+                            return SynthesisType::eager;
+                        if (synthesis_type_str == "lazy")
+                            return SynthesisType::lazy;
+                        if (synthesis_type_str == "unified")
+                            return SynthesisType::unified;
+                        DVLAB_UNREACHABLE("Invalid synthesis type!!");
+                        return SynthesisType::eager;
                     });
 
                 spdlog::info("Converting to Tableau {} to QCir {}...", tableau_mgr.focused_id(), qcir_mgr.get_next_id());
@@ -311,14 +336,13 @@ Command convert_from_tableau_cmd(tableau::TableauMgr& tableau_mgr, qcir::QCirMgr
                     *tableau_mgr.get(),
                     *clifford_strategy,
                     *rotation_strategy,
-                    lazy);
+                    synthesis_type);
 
                 if (qcir.has_value()) {
                     qcir_mgr.add(qcir_mgr.get_next_id(), std::make_unique<qcir::QCir>(std::move(qcir.value())));
-
-                    qcir_mgr.set_filename(tableau_mgr.get_filename());
-                    qcir_mgr.add_procedures(tableau_mgr.get_procedures());
-                    qcir_mgr.add_procedure("TABL2QC");
+                    qcir_mgr.get()->set_filename(tableau_mgr.get()->get_filename());
+                    qcir_mgr.get()->add_procedures(tableau_mgr.get()->get_procedures());
+                    qcir_mgr.get()->add_procedure("TABL2QC");
                 }
 
                 return CmdExecResult::done;

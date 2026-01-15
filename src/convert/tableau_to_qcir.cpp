@@ -22,8 +22,9 @@ namespace qsyn::tableau {
 
 namespace detail {
 
+using COT = CliffordOperatorType;
+
 void add_clifford_gate(qcir::QCir& qcir, CliffordOperator const& op) {
-    using COT                  = CliffordOperatorType;
     auto const& [type, qubits] = op;
 
     switch (type) {
@@ -64,6 +65,108 @@ void add_clifford_gate(qcir::QCir& qcir, CliffordOperator const& op) {
             qcir.append(qcir::ECRGate(), {qubits[0], qubits[1]});
             break;
     }
+}
+
+// TODO: merge with add_clifford_gate
+void prepend_clifford_gate(qcir::QCir& qcir, CliffordOperator const& op) {
+    auto const& [type, qubits] = op;
+    switch (type) {
+        case COT::h:
+            qcir.prepend(qcir::HGate(), {qubits[0]});
+            break;
+        case COT::s:
+            qcir.prepend(qcir::SGate(), {qubits[0]});
+            break;
+        case COT::cx:
+            qcir.prepend(qcir::CXGate(), {qubits[0], qubits[1]});
+            break;
+        case COT::sdg:
+            qcir.prepend(qcir::SdgGate(), {qubits[0]});
+            break;
+        case COT::v:
+            qcir.prepend(qcir::SXGate(), {qubits[0]});
+            break;
+        case COT::vdg:
+            qcir.prepend(qcir::SXdgGate(), {qubits[0]});
+            break;
+        case COT::x:
+            qcir.prepend(qcir::XGate(), {qubits[0]});
+            break;
+        case COT::y:
+            qcir.prepend(qcir::YGate(), {qubits[0]});
+            break;
+        case COT::z:
+            qcir.prepend(qcir::ZGate(), {qubits[0]});
+            break;
+        case COT::cz:
+            qcir.prepend(qcir::CZGate(), {qubits[0], qubits[1]});
+            break;
+        case COT::swap:
+            qcir.prepend(qcir::SwapGate(), {qubits[0], qubits[1]});
+            break;
+        case COT::ecr:
+            qcir.prepend(qcir::ECRGate(), {qubits[0], qubits[1]});
+            break;
+    }
+}
+
+void add_clifford_gate(PauliRotationTableau& rotations, CliffordOperator const& op) {
+    auto const& [type, qubits] = op;
+
+    switch (type) {
+        case COT::h:
+            for (auto& rot : rotations) {
+                rot.h(qubits[0]);
+            }
+            break;
+        case COT::s:
+            for (auto& rot : rotations) {
+                rot.s(qubits[0]);
+            }
+            break;
+        case COT::cx:
+            for (auto& rot : rotations) {
+                rot.cx(qubits[0], qubits[1]);
+            }
+            break;
+        case COT::v:
+            for (auto& rot : rotations) {
+                rot.h(qubits[0]);
+                rot.s(qubits[0]);
+                rot.h(qubits[0]);
+            }
+            break;
+        default:
+            spdlog::error("Invalid Clifford operator type {}. The operation is skipped.", to_string(type));
+            break;
+    }
+}
+
+void add_clifford_gate(StabilizerTableau& tableau, CliffordOperator const& op) {
+    auto const& [type, qubits] = op;
+    switch (type) {
+        case COT::h:
+            tableau.h(qubits[0]);
+            break;
+        case COT::s:
+            tableau.s(qubits[0]);
+            break;
+        case COT::cx:
+            tableau.cx(qubits[0], qubits[1]);
+            break;
+        case COT::sdg:
+            tableau.sdg(qubits[0]);
+            break;
+        case COT::v:
+            tableau.v(qubits[0]);
+            break;
+        case COT::vdg:
+            tableau.vdg(qubits[0]);
+    }
+}
+
+void prepend_clifford_gate(StabilizerTableau& tableau, CliffordOperator const& op) {
+    tableau.prepend(op);
 }
 
 }  // namespace detail
@@ -108,6 +211,7 @@ std::optional<qcir::QCir> to_qcir_eager(
     PauliRotationsSynthesisStrategy const& pr_strategy) {
     qcir::QCir qcir{tableau.n_qubits()};
 
+    size_t iter = 0;
     for (auto const& subtableau : tableau) {
         if (stop_requested()) {
             return std::nullopt;
@@ -126,6 +230,7 @@ std::optional<qcir::QCir> to_qcir_eager(
             return std::nullopt;
         }
         qcir.compose(*qc_fragment);
+        iter++;
     }
 
     return qcir;
@@ -156,7 +261,8 @@ void synthesize_clifford_until_h_free(
     qcir::QCir& qcir,
     StabilizerTableau const& this_clifford,
     PauliRotationTableau& prt,
-    StabilizerTableau& next_clifford) {
+    StabilizerTableau& next_clifford,
+    size_t iter) {
     // synthesize until the H-layer
     // the H-opt synthesis strategy put the H-optimal circuit
     // at the end. however, we want to synthesize them first.
@@ -167,8 +273,12 @@ void synthesize_clifford_until_h_free(
     auto const diag_gates =
         st_strategy.partial_synthesize(clifford_adj);
 
+    size_t cx_gate_count = 0;
     for (auto const& op : diag_gates) {
         detail::add_clifford_gate(qcir, op);
+        if (op.first == CliffordOperatorType::cx) {
+            cx_gate_count++;
+        }
     }
 
     // now, [diag_gates] -- [rem_gates] -- [prt] -- [next_clifford]
@@ -195,7 +305,7 @@ std::optional<qcir::QCir>
 to_qcir_lazy(
     Tableau tableau,  // takes copy to avoid modifying the original tableau
     PartialPauliRotationsSynthesisStrategy const& pr_strategy) {
-    fmt::println("Note: lazy synthesis is not stable. Use at your own risk!!");
+    // fmt::println("Note: lazy synthesis is not stable. Use at your own risk!!");
     if (!is_alternating(tableau)) {
         spdlog::error(
             "Subtableaux must alternate between "
@@ -212,6 +322,8 @@ to_qcir_lazy(
 
     qcir::QCir qcir{tableau.n_qubits()};
 
+    size_t clifford_segment_idx = 0;
+
     for (size_t i = 0; i < tableau.size() - 1; ++i) {
         bool const current_is_st =
             std::holds_alternative<StabilizerTableau>(tableau[i]);
@@ -222,7 +334,9 @@ to_qcir_lazy(
                 qcir,
                 std::get<StabilizerTableau>(tableau[i]),
                 std::get<PauliRotationTableau>(tableau[i + 1]),
-                std::get<StabilizerTableau>(tableau[i + 2]));
+                std::get<StabilizerTableau>(tableau[i + 2]),
+                clifford_segment_idx);
+            clifford_segment_idx++;
         } else {
             auto const& prt =
                 std::get<PauliRotationTableau>(tableau[i]);
@@ -261,6 +375,32 @@ to_qcir_lazy(
     return qcir;
 }
 
+std::optional<qcir::QCir>
+to_qcir_backward(
+    Tableau tableau,
+    BackwardPartialPauliRotationsSynthesisStrategy const& pr_strategy,
+    StabilizerTableauSynthesisStrategy const& st_strategy) {
+    if (tableau.size() != 2 || !std::holds_alternative<StabilizerTableau>(tableau[0]) || !std::holds_alternative<PauliRotationTableau>(tableau[1])) {
+        spdlog::error("Tableau should be collapsed in Unified synthesis strategy.");
+        return std::nullopt;
+    }
+
+    auto& initial_clifford = std::get<StabilizerTableau>(tableau[0]);
+    auto const& rotations  = std::get<PauliRotationTableau>(tableau[1]);
+
+    auto result = pr_strategy.backward_synthesize(rotations, initial_clifford);
+    if (!result) {
+        return std::nullopt;
+    }
+    auto initial_clifford_qcir = to_qcir(initial_clifford, st_strategy);
+    if (!initial_clifford_qcir) {
+        return std::nullopt;
+    }
+    initial_clifford_qcir->compose(*result);
+
+    return initial_clifford_qcir;
+}
+
 }  // namespace
 
 /**
@@ -275,8 +415,8 @@ std::optional<qcir::QCir> to_qcir(
     Tableau const& tableau,
     StabilizerTableauSynthesisStrategy const& st_strategy,
     PauliRotationsSynthesisStrategy const& pr_strategy,
-    bool lazy) {
-    if (lazy) {
+    SynthesisType synthesis_type) {
+    if (synthesis_type == SynthesisType::lazy) {
         auto const* pr_strategy_ptr =
             dynamic_cast<PartialPauliRotationsSynthesisStrategy const*>(
                 &pr_strategy);
@@ -285,6 +425,17 @@ std::optional<qcir::QCir> to_qcir(
                 tableau, *pr_strategy_ptr);
         }
         spdlog::error("Lazy synthesis requires a partially-synthesizable Pauli rotations synthesis strategy!!");
+        return std::nullopt;
+    }
+    if (synthesis_type == SynthesisType::unified) {
+        auto const* pr_strategy_ptr =
+            dynamic_cast<BackwardPartialPauliRotationsSynthesisStrategy const*>(
+                &pr_strategy);
+        if (pr_strategy_ptr) {
+            // We keep the scalability of "forward" synthesis for unified synthesis strategy
+            return to_qcir_backward(tableau, *pr_strategy_ptr, st_strategy);
+        }
+        spdlog::error("Unified synthesis requires a backward-synthesizable Pauli rotations synthesis strategy!!");
         return std::nullopt;
     }
     return to_qcir_eager(tableau, st_strategy, pr_strategy);
