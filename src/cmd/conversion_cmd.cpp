@@ -75,9 +75,9 @@ Command convert_from_qcir_cmd(
                 if (graph.has_value()) {
                     zxgraph_mgr.add(zxgraph_mgr.get_next_id(), std::make_unique<qsyn::zx::ZXGraph>(std::move(graph.value())));
 
-                    zxgraph_mgr.get()->set_filename(qcir_mgr.get()->get_filename());
-                    zxgraph_mgr.get()->add_procedures(qcir_mgr.get()->get_procedures());
-                    zxgraph_mgr.get()->add_procedure("QC2ZX");
+                    zxgraph_mgr.set_filename(qcir_mgr.get_filename());
+                    zxgraph_mgr.add_procedures(qcir_mgr.get_procedures());
+                    zxgraph_mgr.add_procedure("QC2ZX");
                 }
                 return CmdExecResult::done;
             }
@@ -90,9 +90,9 @@ Command convert_from_qcir_cmd(
                     tensor_mgr.add(tensor_mgr.get_next_id());
                     tensor_mgr.set(std::make_unique<qsyn::tensor::QTensor<double>>(std::move(tensor.value())));
 
-                    tensor_mgr.get()->set_filename(qcir_mgr.get()->get_filename());
-                    tensor_mgr.get()->add_procedures(qcir_mgr.get()->get_procedures());
-                    tensor_mgr.get()->add_procedure("QC2TS");
+                    tensor_mgr.set_filename(qcir_mgr.get_filename());
+                    tensor_mgr.add_procedures(qcir_mgr.get_procedures());
+                    tensor_mgr.add_procedure("QC2TS");
                 }
                 return CmdExecResult::done;
             }
@@ -103,9 +103,9 @@ Command convert_from_qcir_cmd(
                 if (tableau.has_value()) {
                     tableau_mgr.add(tableau_mgr.get_next_id(), std::make_unique<tableau::Tableau>(std::move(tableau.value())));
 
-                    tableau_mgr.get()->set_filename(qcir_mgr.get()->get_filename());
-                    tableau_mgr.get()->add_procedures(qcir_mgr.get()->get_procedures());
-                    tableau_mgr.get()->add_procedure("QC2TABL");
+                    tableau_mgr.set_filename(qcir_mgr.get_filename());
+                    tableau_mgr.add_procedures(qcir_mgr.get_procedures());
+                    tableau_mgr.add_procedure("QC2TABL");
                 }
                 return CmdExecResult::done;
             }
@@ -151,16 +151,16 @@ Command convert_from_zx_cmd(zx::ZXGraphMgr& zxgraph_mgr, QCirMgr& qcir_mgr, tens
                 qcir::QCir* result = ext.extract();
                 if (result != nullptr) {
                     qcir_mgr.add(qcir_mgr.get_next_id(), std::unique_ptr<qcir::QCir>(result));
-                    qcir_mgr.get()->set_filename(zxgraph_mgr.get()->get_filename());
-                    qcir_mgr.get()->add_procedures(zxgraph_mgr.get()->get_procedures());
+                    qcir_mgr.set_filename(zxgraph_mgr.get_filename());
+                    qcir_mgr.add_procedures(zxgraph_mgr.get_procedures());
                     if (!extractor::EXTRACTOR_CONFIG.permute_qubits) {
                         spdlog::warn("The extracted circuit is up to a qubit permutation.");
                         spdlog::warn("Remaining permutation information is in ZXGraph id {}.", zxgraph_mgr.get_next_id());
                         zxgraph_mgr.add(zxgraph_mgr.get_next_id(), std::make_unique<zx::ZXGraph>(std::move(target)));
-                        zxgraph_mgr.get()->add_procedure("ZX2QC-Unpermuted");
-                        qcir_mgr.get()->add_procedure("ZX2QC-Unpermuted");
+                        zxgraph_mgr.add_procedure("ZX2QC-Unpermuted");
+                        qcir_mgr.add_procedure("ZX2QC-Unpermuted");
                     } else
-                        qcir_mgr.get()->add_procedure("ZX2QC");
+                        qcir_mgr.add_procedure("ZX2QC");
 
                     assert(std::ranges::all_of(qcir_mgr.get()->get_gates(), [&](auto* gate) { return gate->get_id() == qcir_mgr.get()->get_gate(gate->get_id())->get_id(); }));
                 }
@@ -173,9 +173,9 @@ Command convert_from_zx_cmd(zx::ZXGraphMgr& zxgraph_mgr, QCirMgr& qcir_mgr, tens
                 if (tensor.has_value()) {
                     tensor_mgr.add(tensor_mgr.get_next_id(), std::make_unique<qsyn::tensor::QTensor<double>>(std::move(tensor.value())));
 
-                    tensor_mgr.get()->set_filename(zxgraph_mgr.get()->get_filename());
-                    tensor_mgr.get()->add_procedures(zxgraph_mgr.get()->get_procedures());
-                    tensor_mgr.get()->add_procedure("ZX2TS");
+                    tensor_mgr.set_filename(zxgraph_mgr.get_filename());
+                    tensor_mgr.add_procedures(zxgraph_mgr.get_procedures());
+                    tensor_mgr.add_procedure("ZX2TS");
                 }
                 return CmdExecResult::done;
             }
@@ -206,9 +206,9 @@ Command convert_from_tensor_cmd(tensor::TensorMgr& tensor_mgr, QCirMgr& qcir_mgr
 
                 if (result) {
                     qcir_mgr.add(qcir_mgr.get_next_id(), std::make_unique<qcir::QCir>(std::move(*result)));
-                    qcir_mgr.get()->add_procedures(tensor_mgr.get()->get_procedures());
-                    qcir_mgr.get()->add_procedure("TS2QC");
-                    qcir_mgr.get()->set_filename(tensor_mgr.get()->get_filename());
+                    qcir_mgr.add_procedures(tensor_mgr.get_procedures());
+                    qcir_mgr.add_procedure("TS2QC");
+                    qcir_mgr.set_filename(tensor_mgr.get_filename());
                 }
 
                 return CmdExecResult::done;
@@ -316,9 +316,9 @@ Command convert_from_tableau_cmd(tableau::TableauMgr& tableau_mgr, qcir::QCirMgr
                 if (qcir.has_value()) {
                     qcir_mgr.add(qcir_mgr.get_next_id(), std::make_unique<qcir::QCir>(std::move(qcir.value())));
 
-                    qcir_mgr.get()->set_filename(tableau_mgr.get()->get_filename());
-                    qcir_mgr.get()->add_procedures(tableau_mgr.get()->get_procedures());
-                    qcir_mgr.get()->add_procedure("TABL2QC");
+                    qcir_mgr.set_filename(tableau_mgr.get_filename());
+                    qcir_mgr.add_procedures(tableau_mgr.get_procedures());
+                    qcir_mgr.add_procedure("TABL2QC");
                 }
 
                 return CmdExecResult::done;
@@ -368,9 +368,9 @@ Command sk_decompose_cmd(qsyn::tensor::TensorMgr& tensor_mgr, QCirMgr& qcir_mgr)
 
                 if (result) {
                     qcir_mgr.add(qcir_mgr.get_next_id(), std::make_unique<qcir::QCir>(std::move(*result)));
-                    qcir_mgr.get()->add_procedures(tensor_mgr.get()->get_procedures());
-                    qcir_mgr.get()->add_procedure("Solovay-Kitaev");
-                    qcir_mgr.get()->set_filename(tensor_mgr.get()->get_filename());
+                    qcir_mgr.add_procedures(tensor_mgr.get_procedures());
+                    qcir_mgr.add_procedure("Solovay-Kitaev");
+                    qcir_mgr.set_filename(tensor_mgr.get_filename());
                 }
 
                 return CmdExecResult::done;

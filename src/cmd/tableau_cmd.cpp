@@ -294,25 +294,25 @@ dvlab::Command tableau_optimization_cmd(TableauMgr& tableau_mgr) {
                     break;
                 case OptimizationMethod::collapse:
                     collapse(*tableau_mgr.get());
-                    tableau_mgr.get()->add_procedure("collapse");
+                    tableau_mgr.add_procedure("collapse");
                     break;
                 case OptimizationMethod::t_merge:
                     merge_rotations(*tableau_mgr.get());
-                    tableau_mgr.get()->add_procedure("MergeT");
+                    tableau_mgr.add_procedure("MergeT");
                     break;
                 case OptimizationMethod::internal_h_opt:
                     minimize_internal_hadamards(*tableau_mgr.get());
-                    tableau_mgr.get()->add_procedure("InternalHOpt");
+                    tableau_mgr.add_procedure("InternalHOpt");
                     break;
                 case OptimizationMethod::phase_polynomial_optimization:
                     do_phase_polynomial_optimization();
-                    tableau_mgr.get()->add_procedure("PhasePolyOpt");
+                    tableau_mgr.add_procedure("PhasePolyOpt");
                     break;
                 case OptimizationMethod::matroid_partition:
                     if (!do_matroid_partition()) {
                         return dvlab::CmdExecResult::error;
                     }
-                    tableau_mgr.get()->add_procedure("MatroidPartition");
+                    tableau_mgr.add_procedure("MatroidPartition");
                     break;
             }
 
