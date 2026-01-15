@@ -117,23 +117,6 @@ public:
         return _subtableaux[idx];
     }
 
-    auto get_filename() const {
-        return _filename;
-    }
-    auto set_filename(std::string const& filename) {
-        _filename = filename;
-    }
-
-    auto get_procedures() const {
-        return _procedures;
-    }
-    auto add_procedure(std::string const& procedure) {
-        _procedures.push_back(procedure);
-    }
-    auto add_procedures(std::vector<std::string> const& procedures) {
-        _procedures.insert(_procedures.end(), procedures.begin(), procedures.end());
-    }
-
     Tableau& h(size_t qubit) noexcept override;
     Tableau& s(size_t qubit) noexcept override;
     Tableau& cx(size_t control, size_t target) noexcept override;
@@ -141,8 +124,6 @@ public:
 private:
     std::vector<SubTableau> _subtableaux;
     std::size_t _n_qubits;
-    std::string _filename;
-    std::vector<std::string> _procedures;
 };
 
 void adjoint_inplace(SubTableau& subtableau);
