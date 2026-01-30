@@ -13,12 +13,10 @@ set(CMAKE_CXX_FLAGS_DEBUG "-g")
 set(CMAKE_CXX_FLAGS_RELEASE "-O3")
 
 # Set BLA_VENDOR before project() so it's available during initialization
-# Use CACHE so it persists across build directories (release vs debug)
-set(BLA_VENDOR OpenBLAS CACHE STRING "BLAS vendor to search for")
-# Prefer pkg-config on Linux where it works, but not on macOS where OpenBLAS
-# from Homebrew doesn't provide pkg-config files
-if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
-    set(BLA_PREFER_PKGCONFIG ON CACHE BOOL "Prefer pkg-config for BLAS")
+# On macOS, we need to specify OpenBLAS explicitly
+# On Linux, we'll use pkg-config instead (see find_package(BLAS) below)
+if(NOT CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    set(BLA_VENDOR OpenBLAS CACHE STRING "BLAS vendor to search for")
 endif()
 
 include(FetchContent)
@@ -93,8 +91,26 @@ include(scripts/cmake/target_link_libraries_system.cmake)
 
 # find_package(OpenMP REQUIRED)
 
-find_package(BLAS REQUIRED)
-find_package(LAPACK REQUIRED)
+# Use pkg-config to find BLAS and LAPACK on Linux where it's available and reliable
+# On macOS, OpenBLAS from Homebrew doesn't provide pkg-config files, so use FindBLAS instead
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    find_package(PkgConfig)
+    if(PKG_CONFIG_FOUND)
+        pkg_check_modules(BLAS IMPORTED_TARGET blas)
+        pkg_check_modules(LAPACK IMPORTED_TARGET lapack)
+        if(BLAS_FOUND AND LAPACK_FOUND)
+            # Set variables expected by the rest of the build
+            set(BLAS_LIBRARIES PkgConfig::BLAS)
+            set(LAPACK_LIBRARIES PkgConfig::LAPACK)
+        endif()
+    endif()
+endif()
+
+# If pkg-config didn't find BLAS/LAPACK (or we're not on Linux), use CMake's find_package
+if(NOT BLAS_FOUND OR NOT LAPACK_FOUND)
+    find_package(BLAS REQUIRED)
+    find_package(LAPACK REQUIRED)
+endif()
 
 FetchContent_Declare(
     xtl
