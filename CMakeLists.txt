@@ -112,6 +112,14 @@ if(NOT BLAS_FOUND OR NOT LAPACK_FOUND)
     find_package(LAPACK REQUIRED)
 endif()
 
+# Ensure BLAS_LIBRARIES and LAPACK_LIBRARIES are set
+if(NOT BLAS_LIBRARIES)
+    set(BLAS_LIBRARIES ${BLAS_openblas_LIBRARY})
+endif()
+if(NOT LAPACK_LIBRARIES)
+    set(LAPACK_LIBRARIES ${LAPACK_openblas_LIBRARY})
+endif()
+
 FetchContent_Declare(
     xtl
     SYSTEM
@@ -189,6 +197,7 @@ FetchContent_Declare(
 FetchContent_MakeAvailable(cadical)
 
 # --- libabc (patched for new CMake) ---
+set(READLINE_FOUND FALSE CACHE BOOL "Disable readline in libabc")
 FetchContent_Declare(
   libabc
   SYSTEM
@@ -278,7 +287,6 @@ target_link_libraries_system(
 target_link_libraries(
     ${QSYN_LIB_NAME} 
     PRIVATE 
-    lapack 
 # OpenMP::OpenMP_CXX 
     ${BLAS_LIBRARIES}
     ${LAPACK_LIBRARIES})
@@ -304,6 +312,13 @@ target_compile_options(
 # compilers are being too paranoid about missing field initializers
 target_compile_options(
     ${CMAKE_PROJECT_NAME} PRIVATE -Wno-missing-field-initializers)
+
+# GCC-specific: disable -Wmaybe-uninitialized (has false positives with templates)
+check_cxx_compiler_flag(-Wno-maybe-uninitialized COMPILER_SUPPORTS_WNO_MAYBE_UNINITIALIZED)
+if(COMPILER_SUPPORTS_WNO_MAYBE_UNINITIALIZED)
+    target_compile_options(
+        ${CMAKE_PROJECT_NAME} PRIVATE -Wno-maybe-uninitialized)
+endif()
 
 # GCC 12+ is too strict about restrict warnings in std::string operations
 # Only apply to GCC, as Clang doesn't support this flag
@@ -337,7 +352,6 @@ target_link_libraries_system(
 target_link_libraries(
     ${CMAKE_PROJECT_NAME} 
     PRIVATE 
-    lapack 
 # OpenMP::OpenMP_CXX 
     ${BLAS_LIBRARIES} 
     ${LAPACK_LIBRARIES})
@@ -382,6 +396,14 @@ target_compile_options(
     ${UNIT_TEST_NAME}
     PRIVATE 
     -Wno-missing-field-initializers)
+
+# GCC-specific: disable -Wmaybe-uninitialized (has false positives with templates)
+if(COMPILER_SUPPORTS_WNO_MAYBE_UNINITIALIZED)
+    target_compile_options(
+        ${UNIT_TEST_NAME}
+        PRIVATE 
+        -Wno-maybe-uninitialized)
+endif()
 
 # GCC 12+ is too strict about restrict warnings in std::string operations
 # Only apply to GCC, as Clang doesn't support this flag
