@@ -289,9 +289,9 @@ target_link_libraries(
     ${LAPACK_LIBRARIES})
 
 # GCC 15+ cast-user-defined: same as qsyn executable
-if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
-    target_compile_options(
-        ${QSYN_LIB_NAME} PRIVATE -Wno-error=cast-user-defined)
+if(COMPILER_SUPPORTS_WNOERROR_CAST_USER_DEFINED)
+    target_compile_options(${QSYN_LIB_NAME}
+                           PRIVATE -Wno-error=cast-user-defined)
 endif()
 
 # ----------------------------------------------------------------------------
@@ -316,18 +316,21 @@ target_compile_options(
 target_compile_options(
     ${CMAKE_PROJECT_NAME} PRIVATE -Wno-missing-field-initializers)
 
-# GCC 12+ is too strict about restrict warnings in std::string operations
-# Only apply to GCC, as Clang doesn't support this flag
+# GCC 12+ is too strict about restrict warnings in std::string operations.
+# Only apply when the compiler actually supports the flag.
 check_cxx_compiler_flag(-Wno-restrict COMPILER_SUPPORTS_WNO_RESTRICT)
 if(COMPILER_SUPPORTS_WNO_RESTRICT)
-    target_compile_options(
-        ${CMAKE_PROJECT_NAME} PRIVATE -Wno-restrict)
+    target_compile_options(${CMAKE_PROJECT_NAME} PRIVATE -Wno-restrict)
 endif()
 
-# GCC 15+ treats C-style cast in ordered_hashtable as -Werror=cast-user-defined
-if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
-    target_compile_options(
-        ${CMAKE_PROJECT_NAME} PRIVATE -Wno-error=cast-user-defined)
+# GCC 15+ (and some toolchains) treat C-style casts in ordered_hashtable as
+# -Werror=cast-user-defined. Relax this to a warning, but only if the flag
+# is recognized by the current compiler (older GCC/Clang may not know it).
+check_cxx_compiler_flag(
+    -Wno-error=cast-user-defined COMPILER_SUPPORTS_WNOERROR_CAST_USER_DEFINED)
+if(COMPILER_SUPPORTS_WNOERROR_CAST_USER_DEFINED)
+    target_compile_options(${CMAKE_PROJECT_NAME}
+                           PRIVATE -Wno-error=cast-user-defined)
 endif()
 
 target_include_directories(
@@ -414,8 +417,7 @@ endif()
 # as -Werror=cast-user-defined when building unit tests. Relax this to a
 # warning so the test target can still be built while keeping the warning
 # visible in the output.
-if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
-    target_compile_options(
-        ${UNIT_TEST_NAME}
-        PRIVATE -Wno-error=cast-user-defined)
+if(COMPILER_SUPPORTS_WNOERROR_CAST_USER_DEFINED)
+    target_compile_options(${UNIT_TEST_NAME}
+                           PRIVATE -Wno-error=cast-user-defined)
 endif()
