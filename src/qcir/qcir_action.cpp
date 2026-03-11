@@ -48,8 +48,8 @@ QCir& QCir::tensor_product(QCir const& other) {
         auto const old_qubits = targ_gate->get_qubits();
         auto const qubits     = old_qubits | std::views::transform([&](auto qubit) {
                                 return qubit + old_num_qubits;
-                                }) |
-                                tl::to<QubitIdList>();
+                            }) |
+                            tl::to<QubitIdList>();
         append(targ_gate->get_operation(), qubits);
     }
     return *this;

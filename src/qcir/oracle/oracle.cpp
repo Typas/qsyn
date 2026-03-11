@@ -90,7 +90,7 @@ std::optional<QCir> synthesize_boolean_oracle(XAG xag, size_t n_ancilla, size_t 
                                               views::values |
                                               views::transform([](DepGraphNode const& node) {
                                                  return node.dependencies.size();
-                                              }));
+                                             }));
     if (n_ancilla > num_nodes - num_outputs) {
         spdlog::warn("n_ancilla = {} is too large, using n_ancilla = {} instead",
                      n_ancilla,
@@ -209,17 +209,17 @@ std::optional<QCir> build_qcir(
         auto const& curr_pebble = pebble_states.front();
         auto const& next_pebble = pebble_states.back();
         auto pebble_uncomputed  = tl::views::zip(curr_pebble, next_pebble) |
-                                  views::transform([](auto const& p) {
+                                 views::transform([](auto const& p) {
                                      auto [curr, next] = p;
                                      return curr && !next;
-                                  }) |
-                                  tl::to<std::vector>();
-        auto pebble_computed    = tl::views::zip(curr_pebble, next_pebble) |
-                                  views::transform([](auto const& p) {
+                                 }) |
+                                 tl::to<std::vector>();
+        auto pebble_computed = tl::views::zip(curr_pebble, next_pebble) |
+                               views::transform([](auto const& p) {
                                    auto [curr, next] = p;
                                    return !curr && next;
-                                  }) |
-                                  tl::to<std::vector>();
+                               }) |
+                               tl::to<std::vector>();
 
         for (auto const& [pebble_id, is_changed] : tl::views::enumerate(pebble_uncomputed)) {
             if (!is_changed) {
