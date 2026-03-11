@@ -280,6 +280,12 @@ target_link_libraries(
     ${BLAS_LIBRARIES}
     ${LAPACK_LIBRARIES})
 
+# GCC 15+ cast-user-defined: same as qsyn executable
+if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+    target_compile_options(
+        ${QSYN_LIB_NAME} PRIVATE -Wno-error=cast-user-defined)
+endif()
+
 # ----------------------------------------------------------------------------
 # config for qsyn target
 # builds qsyn executable
@@ -308,6 +314,12 @@ check_cxx_compiler_flag(-Wno-restrict COMPILER_SUPPORTS_WNO_RESTRICT)
 if(COMPILER_SUPPORTS_WNO_RESTRICT)
     target_compile_options(
         ${CMAKE_PROJECT_NAME} PRIVATE -Wno-restrict)
+endif()
+
+# GCC 15+ treats C-style cast in ordered_hashtable as -Werror=cast-user-defined
+if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+    target_compile_options(
+        ${CMAKE_PROJECT_NAME} PRIVATE -Wno-error=cast-user-defined)
 endif()
 
 target_include_directories(
