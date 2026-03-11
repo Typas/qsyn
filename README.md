@@ -106,6 +106,8 @@ Since Qsyn uses C++20 features not fully supported by Apple Clang, install a C++
    ```
    After installation, follow `brew`’s instructions to use LLVM’s `clang++` (e.g. add its `bin` to `PATH`).
 
+   > **Note:** Use `llvm@18` on some device may work. The unversioned `llvm` formula installs the latest LLVM (currently 20+), which has a known `consteval`/`FMT_STRING` incompatibility that causes build failures with the `fmt` version used by qsyn.
+
 2. **GCC** via Homebrew (recommended if you see fmt/consteval or similar build errors with LLVM):
    ```sh
    brew install gcc
