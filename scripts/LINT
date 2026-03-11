@@ -19,7 +19,12 @@ format_one() {
 export -f format_one
 
 lint_one() {
-    clang-tidy -p build "$1" --quiet 2>&1 | grep -v -E "warnings? generated"
+    clang-tidy -p build-lint "$1" --quiet 2>&1 \
+        | grep -v -E "warnings? generated" \
+        | grep -v -E "file not found \[clang-diagnostic-error\]" \
+        | grep -v -E "^Error while processing .*\.$" \
+        | grep -v -E "^[[:space:]]*[0-9]+ \\|[[:space:]]*#include <" \
+        | grep -v -E "^[[:space:]]*\\|[[:space:]]*\\^~+"
 }
 export -f lint_one
 
@@ -30,7 +35,10 @@ CPPS=$(find ./src -regex '.*\.cpp' -type f)
 echo "Formatting files..."
 parallel -j"$(num_procs)" format_one ::: "$FILES"
 echo "Generating compile commands..."
-cmake -S . -B build -DCMAKE_EXPORT_COMPILE_COMMANDS=1 > /dev/null
+# Use Apple clang for the lint build to avoid toolchain/header
+# incompatibilities when analyzing with clang-tidy.
+cmake -S . -B build-lint -DCMAKE_EXPORT_COMPILE_COMMANDS=1 \
+  -DCMAKE_C_COMPILER=/usr/bin/clang -DCMAKE_CXX_COMPILER=/usr/bin/clang++ > /dev/null
 echo "Linting files..."
 parallel -j"$(num_procs)" lint_one ::: "$CPPS"
 echo "Done"

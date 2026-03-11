@@ -1,8 +1,9 @@
 # local env overrides (see .env.local.example)
 .env.local
 
-# cmake folders
+# cmake folders / build trees
 build/
+build-lint/
 debug/
 qsyn*
 !src/qsyn*
@@ -20,6 +21,9 @@ wip/
 # vim configuration files and folders
 .cache/
 compile_commands.json
+
+# log files
+*.log
 
 # doxygen, sphinx, and other documentation files and folders
 docs/_build/
