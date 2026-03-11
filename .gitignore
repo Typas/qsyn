@@ -1,3 +1,6 @@
+# local env overrides (see .env.local.example)
+.env.local
+
 # cmake folders
 build/
 debug/
