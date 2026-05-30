@@ -633,6 +633,228 @@ Polynomial tohpe_once_fast_port(Polynomial const& polynomial, size_t max_moves =
     tohpe_trace("fast_port", "output", fmt::format("terms={}", summarize_term_bitstrings(polynomial_term_bitstrings(output))));
     return output;
 }
+
+std::vector<std::pair<size_t, size_t>> build_pair_indices(size_t num_rows) {
+    std::vector<std::pair<size_t, size_t>> pairs;
+    pairs.reserve(num_rows * (num_rows + 1) / 2);
+    for (size_t alpha = 0; alpha < num_rows; ++alpha) {
+        for (size_t beta = alpha; beta < num_rows; ++beta) {
+            pairs.emplace_back(alpha, beta);
+        }
+    }
+    return pairs;
+}
+
+dvlab::BooleanMatrix build_l(dvlab::BooleanMatrix const& matrix, std::vector<std::pair<size_t, size_t>> const& pair_indices) {
+    dvlab::BooleanMatrix l_matrix;
+    l_matrix.reserve(pair_indices.size(), matrix.num_cols());
+    for (auto const& [alpha, beta] : pair_indices) {
+        dvlab::BooleanMatrix::Row row(matrix.num_cols());
+        for (size_t col = 0; col < matrix.num_cols(); ++col) {
+            row[col] = matrix[alpha][col] & matrix[beta][col];
+        }
+        l_matrix.push_row(row);
+    }
+    return l_matrix;
+}
+
+dvlab::BooleanMatrix build_x(dvlab::BooleanMatrix::Row const& z, std::vector<std::pair<size_t, size_t>> const& pair_indices, size_t num_rows) {
+    dvlab::BooleanMatrix x_matrix;
+    x_matrix.reserve(pair_indices.size(), num_rows);
+    for (auto const& [alpha, beta] : pair_indices) {
+        dvlab::BooleanMatrix::Row row(num_rows, 0);
+        if (alpha != beta) {
+            if (z[alpha] == 1) {
+                row[beta] = 1;
+            }
+            if (z[beta] == 1) {
+                row[alpha] = 1;
+            }
+        }
+        x_matrix.push_row(row);
+    }
+    return x_matrix;
+}
+
+dvlab::BooleanMatrix::Row build_v(dvlab::BooleanMatrix::Row const& z, std::vector<std::pair<size_t, size_t>> const& pair_indices) {
+    dvlab::BooleanMatrix::Row v(pair_indices.size());
+    for (size_t idx = 0; idx < pair_indices.size(); ++idx) {
+        auto const& [alpha, beta] = pair_indices[idx];
+        v[idx]                    = z[alpha] & z[beta];
+    }
+    return v;
+}
+
+std::vector<dvlab::BooleanMatrix::Row> generate_candidate_z(dvlab::BooleanMatrix const& matrix) {
+    std::unordered_set<dvlab::BooleanMatrix::Row, dvlab::BooleanMatrixRowHash> candidates_set;
+    std::vector<dvlab::BooleanMatrix::Row> candidates;
+
+    for (size_t col_idx = 0; col_idx < matrix.num_cols(); ++col_idx) {
+        dvlab::BooleanMatrix::Row z(matrix.num_rows());
+        for (size_t row = 0; row < matrix.num_rows(); ++row) {
+            z[row] = matrix[row][col_idx];
+        }
+        if (!z.is_zeros() && !candidates_set.contains(z)) {
+            candidates_set.insert(z);
+            candidates.push_back(z);
+        }
+    }
+
+    auto const idx_vec = std::views::iota(0ul, matrix.num_cols()) | tl::to<std::vector>();
+    for (auto const& [i, j] : dvlab::combinations<2>(idx_vec)) {
+        dvlab::BooleanMatrix::Row z(matrix.num_rows());
+        for (size_t row = 0; row < matrix.num_rows(); ++row) {
+            z[row] = matrix[row][i] ^ matrix[row][j];
+        }
+        if (!z.is_zeros() && !candidates_set.contains(z)) {
+            candidates_set.insert(z);
+            candidates.push_back(z);
+        }
+    }
+
+    return candidates;
+}
+
+std::vector<dvlab::BooleanMatrix::Row> iterate_nullspace_combinations(dvlab::BooleanMatrix const& nullspace) {
+    if (nullspace.is_empty()) {
+        return {};
+    }
+
+    std::vector<dvlab::BooleanMatrix::Row> combinations;
+    size_t const num_basis    = nullspace.num_rows();
+    size_t const vector_width = nullspace.num_cols();
+
+    for (size_t mask = 1; mask < (1ULL << num_basis); ++mask) {
+        dvlab::BooleanMatrix::Row combo(vector_width, 0);
+        size_t bitmask = mask;
+        size_t idx     = 0;
+        while (bitmask > 0) {
+            if (bitmask & 1) {
+                for (size_t i = 0; i < vector_width; ++i) {
+                    combo[i] ^= nullspace[idx][i];
+                }
+            }
+            bitmask >>= 1;
+            ++idx;
+        }
+        combinations.push_back(combo);
+    }
+
+    return combinations;
+}
+
+dvlab::BooleanMatrix apply_rank1_update(dvlab::BooleanMatrix const& matrix, dvlab::BooleanMatrix::Row const& z, dvlab::BooleanMatrix::Row const& y) {
+    dvlab::BooleanMatrix new_matrix = matrix;
+
+    for (size_t row = 0; row < matrix.num_rows(); ++row) {
+        for (size_t col = 0; col < matrix.num_cols(); ++col) {
+            new_matrix[row][col] ^= (z[row] & y[col]);
+        }
+    }
+
+    if (y.sum() % 2 == 1) {
+        new_matrix.push_zeros_column();
+        for (size_t row = 0; row < matrix.num_rows(); ++row) {
+            new_matrix[row][new_matrix.num_cols() - 1] = z[row];
+        }
+    }
+
+    return new_matrix;
+}
+
+std::optional<std::tuple<dvlab::BooleanMatrix::Row, dvlab::BooleanMatrix::Row, dvlab::BooleanMatrix>> fast_todd_iteration(dvlab::BooleanMatrix const& matrix) {
+    if (matrix.is_empty()) {
+        return std::nullopt;
+    }
+
+    size_t const num_rows = matrix.num_rows();
+    size_t const num_cols = matrix.num_cols();
+    auto const pair_indices = build_pair_indices(num_rows);
+    auto const l_matrix = build_l(matrix, pair_indices);
+
+    auto const original_polynomial = from_boolean_matrix(dvlab::transpose(matrix));
+    size_t const original_count    = original_polynomial.size();
+
+    std::optional<std::tuple<dvlab::BooleanMatrix::Row, dvlab::BooleanMatrix::Row, dvlab::BooleanMatrix>> best_result;
+
+    for (auto const& z : generate_candidate_z(matrix)) {
+        if (stop_requested()) {
+            return best_result;
+        }
+
+        auto const x_matrix = build_x(z, pair_indices, num_rows);
+        auto const v        = build_v(z, pair_indices);
+
+        dvlab::BooleanMatrix v_col(v.size(), 1);
+        for (size_t i = 0; i < v.size(); ++i) {
+            v_col[i][0] = v[i];
+        }
+
+        auto const constraint = hstack(l_matrix, x_matrix, v_col);
+        auto const nullspace  = get_nullspace_transposed(constraint);
+
+        if (nullspace.is_empty()) {
+            continue;
+        }
+
+        for (auto const& solution : iterate_nullspace_combinations(nullspace)) {
+            if (solution.size() != num_cols + num_rows + 1) {
+                continue;
+            }
+
+            dvlab::BooleanMatrix::Row y(num_cols);
+            for (size_t i = 0; i < num_cols; ++i) {
+                y[i] = solution[i];
+            }
+
+            if (y.is_zeros()) {
+                continue;
+            }
+
+            auto const updated_matrix     = apply_rank1_update(matrix, z, y);
+            auto const updated_polynomial = from_boolean_matrix(dvlab::transpose(updated_matrix));
+            int const score               = static_cast<int>(original_count) - static_cast<int>(updated_polynomial.size());
+
+            if (score > 0) {
+                best_result = std::make_tuple(z, y, updated_matrix);
+                return best_result;
+            }
+        }
+    }
+
+    return best_result;
+}
+
+Polynomial fasttodd_once(Polynomial const& polynomial) {
+    if (polynomial.empty()) {
+        return polynomial;
+    }
+
+    Polynomial new_polynomial = polynomial;
+    while (true) {
+        auto const num_terms = new_polynomial.size();
+        new_polynomial       = tohpe_once_fast_port(new_polynomial, static_cast<size_t>(-1));
+        if (new_polynomial.empty() || new_polynomial.size() == num_terms) {
+            break;
+        }
+    }
+
+    spdlog::debug("TOHPE polynomial count: {}", new_polynomial.size());
+
+    auto const phase_poly_matrix = load_phase_poly_matrix(new_polynomial);
+    auto result                  = fast_todd_iteration(phase_poly_matrix);
+
+    if (!result.has_value()) {
+        return new_polynomial;
+    }
+
+    auto const& [z, y, updated_matrix] = result.value();
+    spdlog::debug("Found a Fast-TODD move");
+    spdlog::debug("- z: {}", fmt::join(z, ""));
+    spdlog::debug("- y: {}", fmt::join(y, ""));
+
+    return from_boolean_matrix(dvlab::transpose(updated_matrix));
+}
 }  // namespace
 
 std::pair<StabilizerTableau, Polynomial> TohpePhasePolynomialOptimizationStrategy::optimize(StabilizerTableau const& clifford, Polynomial const& polynomial) const {
@@ -706,7 +928,46 @@ std::pair<StabilizerTableau, Polynomial> TohpePhasePolynomialOptimizationStrateg
 }
 
 std::pair<StabilizerTableau, Polynomial> FastToddPhasePolynomialOptimizationStrategy::optimize(StabilizerTableau const& clifford, Polynomial const& polynomial) const {
-    return {clifford, polynomial};
-}
+    if (polynomial.empty()) {
+        fmt::println("Polynomial is empty, returning the input Clifford and polynomial");
+        return {clifford, polynomial};
+    }
 
+    if (std::ranges::any_of(polynomial, [](PauliRotation const& rotation) { return 4 % rotation.phase().denominator() != 0; })) {
+        spdlog::error("Failed to perform FastTODD optimization: the polynomial contains a non-4th-root-of-unity phase!!");
+        return {clifford, polynomial};
+    }
+
+    auto ret_clifford   = clifford;
+    auto ret_polynomial = polynomial;
+
+    properize(ret_clifford, ret_polynomial);
+
+    auto multi_linear_polynomial = MultiLinearPolynomial();
+    multi_linear_polynomial.add_rotations(ret_polynomial, false);
+
+    spdlog::trace("Polynomial before FastTODD:\n{}", fmt::join(ret_polynomial, "\n"));
+    spdlog::debug("num_terms before FastTODD: {}", ret_polynomial.size());
+
+    while (true) {
+        auto const num_terms = ret_polynomial.size();
+        ret_polynomial       = fasttodd_once(ret_polynomial);
+        if (ret_polynomial.empty() || ret_polynomial.size() == num_terms) {
+            break;
+        }
+        spdlog::trace("Polynomial after FastTODD:\n{}", fmt::join(ret_polynomial, "\n"));
+        spdlog::debug("num_terms after FastTODD: {}", ret_polynomial.size());
+    }
+
+    multi_linear_polynomial.add_rotations(ret_polynomial, true);
+
+    if (auto clifford_ops = multi_linear_polynomial.extract_clifford_operators(); clifford_ops.has_value()) {
+        ret_clifford.apply(*clifford_ops);
+    } else {
+        spdlog::error("Failed to perform FastTODD optimization: the post-optimization polynomial does not have the same signature as the pre-optimization polynomial!!");
+        return {clifford, polynomial};
+    }
+
+    return {ret_clifford, ret_polynomial};
+}
 }  // namespace qsyn::tableau
