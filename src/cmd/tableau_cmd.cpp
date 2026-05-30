@@ -203,7 +203,7 @@ dvlab::Command tableau_optimization_cmd(TableauMgr& tableau_mgr) {
 
             phasepoly_parser.add_argument<std::string>("strategy")
                 .default_value("todd")
-                .constraint(choices_allow_prefix({"todd"}))
+                .constraint(choices_allow_prefix({"todd", "tohpe", "fasttodd"}))
                 .help("Phase polynomial optimization strategy");
 
             auto matpar_parser = methods.add_parser("matpar")
@@ -262,6 +262,10 @@ dvlab::Command tableau_optimization_cmd(TableauMgr& tableau_mgr) {
                 auto const phasepoly_strategy = std::invoke([&]() -> std::unique_ptr<PhasePolynomialOptimizationStrategy> {
                     if (dvlab::str::is_prefix_of(phasepoly_strategy_str, "todd")) {
                         return std::make_unique<ToddPhasePolynomialOptimizationStrategy>();
+                    } else if (dvlab::str::is_prefix_of(phasepoly_strategy_str, "tohpe")) {
+                        return std::make_unique<TohpePhasePolynomialOptimizationStrategy>();
+                    } else if (dvlab::str::is_prefix_of(phasepoly_strategy_str, "fasttodd")) {
+                        return std::make_unique<FastToddPhasePolynomialOptimizationStrategy>();
                     }
                     return nullptr;
                 });
