@@ -9,6 +9,8 @@
 
 #include <cassert>
 #include <cmath>
+#include <cstdlib>
+#include <cstdint>
 #include <gsl/util>
 #include <tl/enumerate.hpp>
 #include <unordered_map>
@@ -19,6 +21,18 @@
 #include "util/util.hpp"
 
 namespace dvlab {
+namespace {
+bool row_add_profile_enabled() {
+    static bool const enabled = [] {
+        auto const* raw = std::getenv("QSYN_TOHPE_PROFILE");
+        return raw != nullptr && raw[0] == '1';
+    }();
+    return enabled;
+}
+
+uint64_t g_row_add_ops   = 0;
+uint64_t g_row_add_bytes = 0;
+}  // namespace
 
 /**
  * @brief Hash function for std::vector<unsigned char>
@@ -74,8 +88,12 @@ BooleanMatrix::Row operator*(BooleanMatrix::Row lhs, BooleanMatrix::Row const& r
  */
 BooleanMatrix::Row& BooleanMatrix::Row::operator+=(Row const& rhs) {
     assert(_row.size() == rhs._row.size());
+    if (row_add_profile_enabled()) {
+        ++g_row_add_ops;
+        g_row_add_bytes += static_cast<uint64_t>(_row.size());
+    }
     for (size_t i = 0; i < _row.size(); i++) {
-        _row[i] = (_row[i] + rhs._row[i]) % 2;
+        _row[i] ^= rhs._row[i];
     }
     return *this;
 }
@@ -490,6 +508,14 @@ dvlab::BooleanMatrix identity(size_t size) {
         ret[i][i] = 1;
     }
     return ret;
+}
+
+uint64_t profiled_row_add_ops() {
+    return g_row_add_ops;
+}
+
+uint64_t profiled_row_add_bytes() {
+    return g_row_add_bytes;
 }
 
 }  // namespace dvlab

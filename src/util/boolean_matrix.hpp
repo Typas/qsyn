@@ -10,6 +10,7 @@
 #include <spdlog/spdlog.h>
 
 #include <cstddef>
+#include <cstdint>
 #include <tl/zip.hpp>
 #include <utility>
 #include <vector>
@@ -159,6 +160,10 @@ dvlab::BooleanMatrix hstack(
 dvlab::BooleanMatrix transpose(dvlab::BooleanMatrix const& matrix);
 
 dvlab::BooleanMatrix identity(size_t size);
+
+// TOHPE diagnosis helpers (enabled by QSYN_TOHPE_PROFILE=1).
+uint64_t profiled_row_add_ops();
+uint64_t profiled_row_add_bytes();
 
 struct BooleanMatrixRowHash {
     size_t operator()(std::vector<unsigned char> const& k) const;
