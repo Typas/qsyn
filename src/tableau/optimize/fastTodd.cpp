@@ -7,10 +7,8 @@
 #include <spdlog/spdlog.h>
 
 #include <algorithm>
-#include <chrono>
 #include <cstddef>
 #include <cstdlib>
-#include <cstdint>
 #include <iterator>
 #include <optional>
 #include <ranges>
@@ -21,14 +19,12 @@
 
 #include "../tableau_optimization.hpp"
 #include "./todd.hpp"
+#include "fmt/core.h"
 #include "tableau/pauli_rotation.hpp"
 #include "tableau/stabilizer_tableau.hpp"
 #include "util/boolean_matrix.hpp"
-#include "util/ordered_hashmap.hpp"
 #include "util/phase.hpp"
 #include "util/util.hpp"
-
-#include "fmt/core.h"
 
 extern bool stop_requested();
 
@@ -38,12 +34,10 @@ using namespace signature;
 using namespace qsyn::tableau;
 
 namespace {
-using Clock = std::chrono::steady_clock;
-
 bool tohpe_trace_enabled() {
     static bool const enabled = [] {
         auto const* raw = std::getenv("QSYN_TOHPE_TRACE");
-        return raw != nullptr && raw[0] == '1';
+        return raw != nullptr && *raw == '1';
     }();
     return enabled;
 }
@@ -51,7 +45,7 @@ bool tohpe_trace_enabled() {
 bool tohpe_trace_compare_enabled() {
     static bool const enabled = [] {
         auto const* raw = std::getenv("QSYN_TOHPE_TRACE_COMPARE");
-        return raw != nullptr && raw[0] == '1';
+        return raw != nullptr && *raw == '1';
     }();
     return enabled;
 }
@@ -59,16 +53,16 @@ bool tohpe_trace_compare_enabled() {
 bool tohpe_trace_stop_on_divergence() {
     static bool const enabled = [] {
         auto const* raw = std::getenv("QSYN_TOHPE_TRACE_STOP_ON_DIVERGENCE");
-        return raw != nullptr && raw[0] == '1';
+        return raw != nullptr && *raw == '1';
     }();
     return enabled;
 }
 
-bool tohpe_use_fast_port() {
+bool tohpe_use_iteration() {
     static bool const enabled = [] {
-        auto const* raw = std::getenv("QSYN_TOHPE_USE_FAST_PORT");
+        auto const* raw = std::getenv("QSYN_TOHPE_USE_ITERATION");
         if (raw == nullptr) return true;
-        return raw[0] != '0';
+        return *raw != '0';
     }();
     return enabled;
 }
@@ -118,59 +112,11 @@ void tohpe_trace(std::string_view impl, std::string_view stage, std::string cons
     fmt::println("[TOHPE_TRACE] impl={} stage={} {}", impl, stage, message);
 }
 
-struct TohpeProfiler {
-    bool const enabled = [] {
-        auto const* raw = std::getenv("QSYN_TOHPE_PROFILE");
-        return raw != nullptr && raw[0] == '1';
-    }();
+constexpr std::string_view k_iteration_tohpe_trace_name = "iteration";
 
-    uint64_t tohpe_once_calls = 0;
-
-    uint64_t kernel_rows_processed = 0;
-    uint64_t kernel_entry_pivots   = 0;
-    uint64_t kernel_row_adds       = 0;
-    uint64_t clear_column_calls    = 0;
-    uint64_t clear_column_row_adds = 0;
-    uint64_t score_seed_inserts    = 0;
-    uint64_t score_pair_count      = 0;
-    uint64_t score_map_updates     = 0;
-    uint64_t removed_rows          = 0;
-
-    /// `get_row_products` inside post-properization rebuild only (see `tohpe_once`).
-    uint64_t ns_rebuild_row_products    = 0;
-    /// `get_l_matrix` + transpose inside post-properization rebuild only.
-    uint64_t ns_rebuild_get_l_transpose = 0;
-
-    ~TohpeProfiler() {
-        if (!enabled) return;
-        if (tohpe_once_calls == 0) return;
-        auto const to_ms = [](uint64_t ns) -> double { return static_cast<double>(ns) / 1'000'000.0; };
-        auto const sum_ns = ns_rebuild_row_products + ns_rebuild_get_l_transpose;
-        auto const sum_ms = to_ms(sum_ns);
-        auto const pct_of_pair = [sum_ms, &to_ms](uint64_t ns) {
-            if (sum_ms == 0.0) return 0.0;
-            return (to_ms(ns) * 100.0) / sum_ms;
-        };
-        // Use fmt::println so output is visible even when spdlog level is "off" (see examples/t-opt.dof).
-        fmt::println("[TOHPE_PROFILE] row_products_ms={:.3f} ({:.1f}%) l_matrix_ms={:.3f} ({:.1f}%)",
-                     to_ms(ns_rebuild_row_products), pct_of_pair(ns_rebuild_row_products),
-                     to_ms(ns_rebuild_get_l_transpose), pct_of_pair(ns_rebuild_get_l_transpose));
-        fmt::println("[TOHPE_PROFILE] row_add_ops={} row_add_bytes={}",
-                     dvlab::profiled_row_add_ops(),
-                     dvlab::profiled_row_add_bytes());
-    }
-};
-
-TohpeProfiler g_tohpe_profiler;
-
-struct ScopedNsTimer {
-    explicit ScopedNsTimer(uint64_t& target) : _target(target), _begin(Clock::now()) {}
-    ~ScopedNsTimer() {
-        _target += static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(Clock::now() - _begin).count());
-    }
-    uint64_t& _target;
-    Clock::time_point _begin;
-};
+void trace_iteration_tohpe(std::string_view stage, std::string const& message) {
+    tohpe_trace(k_iteration_tohpe_trace_name, stage, message);
+}
 
 /**
  * @brief Transform matrix to reduced-row-echelon form, store row operations in augmented_matrix, and get it pivots.
@@ -180,13 +126,10 @@ struct ScopedNsTimer {
  */
 dvlab::BooleanMatrix::Row kernel(dvlab::BooleanMatrix& matrix, dvlab::BooleanMatrix& augmented_matrix, std::unordered_map<size_t, size_t>& pivots) {
     spdlog::trace("kernel start");
-    g_tohpe_profiler.kernel_rows_processed += matrix.num_rows();
-    g_tohpe_profiler.kernel_entry_pivots += pivots.size();
     for (auto i : std::views::iota(0ul, matrix.num_rows())) {
         if (pivots.contains(i)) continue;
         for (auto const& [key, value] : pivots) {
             if (matrix[i][value]) {
-                ++g_tohpe_profiler.kernel_row_adds;
                 matrix[i] += matrix[key];
                 augmented_matrix[i] += augmented_matrix[key];
             }
@@ -203,7 +146,6 @@ dvlab::BooleanMatrix::Row kernel(dvlab::BooleanMatrix& matrix, dvlab::BooleanMat
         auto augmented_pivot = augmented_matrix[i];
         for (auto const& [key, _] : pivots) {
             if (matrix[key][first_one_idx]) {
-                ++g_tohpe_profiler.kernel_row_adds;
                 matrix[key] += pivot;
                 augmented_matrix[key] += augmented_pivot;
             }
@@ -267,7 +209,6 @@ bool compare_row_value(dvlab::BooleanMatrix::Row const& a, dvlab::BooleanMatrix:
 }
 
 void clear_column(size_t idx, dvlab::BooleanMatrix& matrix, dvlab::BooleanMatrix& augmented_matrix, std::unordered_map<size_t, size_t>& pivots) {
-    ++g_tohpe_profiler.clear_column_calls;
     if (!pivots.contains(idx)) return;
     auto val = pivots[idx];
     pivots.erase(idx);
@@ -292,7 +233,6 @@ void clear_column(size_t idx, dvlab::BooleanMatrix& matrix, dvlab::BooleanMatrix
     auto augmented_col = augmented_matrix[idx];
     for (auto j : std::views::iota(0ul, matrix.num_rows())) {
         if (augmented_matrix[j][idx] && idx != j) {
-            ++g_tohpe_profiler.clear_column_row_adds;
             matrix[j] += col;
             augmented_matrix[j] += augmented_col;
         }
@@ -302,7 +242,7 @@ void clear_column(size_t idx, dvlab::BooleanMatrix& matrix, dvlab::BooleanMatrix
 /** Build one row of transpose(L) from a term, matching C++ get_row_products/get_l_matrix column order. */
 dvlab::BooleanMatrix::Row build_l_transpose_row_from_term(dvlab::BooleanMatrix::Row const& term_z, size_t n_qubits) {
     DVLAB_ASSERT(term_z.size() >= n_qubits, "term row shorter than n_qubits");
-    std::vector<unsigned char> vec;
+    std::vector<unsigned char> vec{};
     vec.reserve(n_qubits + (n_qubits * (n_qubits - 1) / 2));
     for (size_t q = 0; q < n_qubits; ++q) {
         vec.emplace_back(term_z[q]);
@@ -349,7 +289,7 @@ dvlab::BooleanMatrix get_z_matrix(dvlab::BooleanMatrix const& phase_poly_matrix)
 }
 
 std::vector<std::vector<std::pair<int, int>>> get_s_matrices(dvlab::BooleanMatrix const& phase_poly_matrix, dvlab::BooleanMatrix const& z_matrix) {
-    std::vector<std::vector<std::pair<int, int>>> s;
+    std::vector<std::vector<std::pair<int, int>>> s{};
     auto phase_poly_matrix_transposed = dvlab::transpose(phase_poly_matrix);
     auto const n_qubits               = phase_poly_matrix.num_rows();
     auto const num_terms              = phase_poly_matrix.num_cols();
@@ -440,25 +380,20 @@ Polynomial tohpe_once(Polynomial const& polynomial) {
             if (y.sum() % 2 == 1) {
                 phase_poly_matrix_copy.push_row(chosen_z);
             }
-            auto const output = from_boolean_matrix(phase_poly_matrix_copy);
-            tohpe_trace("slow", "move", fmt::format("y={} z={} output={}",
-                                                     row_to_bitstring(y), row_to_bitstring(chosen_z),
-                                                     summarize_term_bitstrings(polynomial_term_bitstrings(output))));
+            auto output = from_boolean_matrix(phase_poly_matrix_copy);
+            tohpe_trace("slow", "move", fmt::format("y={} z={} output={}", row_to_bitstring(y), row_to_bitstring(chosen_z), summarize_term_bitstrings(polynomial_term_bitstrings(output))));
             return output;
         }
     }
     // no candidate, return same matrix
-    auto const output = from_boolean_matrix(dvlab::transpose(phase_poly_matrix_copy));
+    auto output = from_boolean_matrix(dvlab::transpose(phase_poly_matrix_copy));
     tohpe_trace("slow", "no-candidate", fmt::format("output={}", summarize_term_bitstrings(polynomial_term_bitstrings(output))));
     return output;
 }
 
-Polynomial tohpe_once_fast_port(Polynomial const& polynomial, size_t max_moves = static_cast<size_t>(-1)) {
+Polynomial tohpe_once_iteration(Polynomial const& polynomial, size_t max_moves = static_cast<size_t>(-1)) {
     if (polynomial.empty()) {
         return polynomial;
-    }
-    if (g_tohpe_profiler.enabled) {
-        ++g_tohpe_profiler.tohpe_once_calls;
     }
     auto const n_qubits = polynomial.front().n_qubits();
 
@@ -473,7 +408,7 @@ Polynomial tohpe_once_fast_port(Polynomial const& polynomial, size_t max_moves =
     dvlab::BooleanMatrix augmented_matrix = dvlab::identity(table.num_rows());
     std::unordered_map<size_t, size_t> pivots;
 
-    tohpe_trace("fast_port", "input", fmt::format("terms={}", summarize_term_bitstrings(polynomial_term_bitstrings(polynomial))));
+    trace_iteration_tohpe("input", fmt::format("terms={}", summarize_term_bitstrings(polynomial_term_bitstrings(polynomial))));
 
     size_t move_idx = 0;
     while (true) {
@@ -483,19 +418,15 @@ Polynomial tohpe_once_fast_port(Polynomial const& polynomial, size_t max_moves =
         auto const pivots_before_move = pivots.size();
         if (y.is_zeros()) {
             spdlog::trace("No y is found, end tohpe.");
-            tohpe_trace("fast_port", "no-y", fmt::format("move={} pivots={}", move_idx, pivots_before_move));
+            trace_iteration_tohpe("no-y", fmt::format("move={} pivots={}", move_idx, pivots_before_move));
             break;
         }
 
-        std::unordered_map<dvlab::BooleanMatrix::Row, int, dvlab::BooleanMatrixRowHash> map;
+        std::unordered_map<dvlab::BooleanMatrix::Row, int, dvlab::BooleanMatrixRowHash> map{};
         auto const y_parity = y.sum() % 2;
         for (auto i : std::views::iota(0ul, n_terms)) {
-            if (y_parity && !y[i]) {
+            if (y[i] != y_parity) {
                 map[table[i]] = 1;
-                ++g_tohpe_profiler.score_seed_inserts;
-            } else if (!y_parity && y[i]) {
-                map[table[i]] = 1;
-                ++g_tohpe_profiler.score_seed_inserts;
             }
         }
 
@@ -503,17 +434,15 @@ Polynomial tohpe_once_fast_port(Polynomial const& polynomial, size_t max_moves =
             if (!y[i]) continue;
             for (auto j : std::views::iota(0ul, n_terms)) {
                 if (y[j]) continue;
-                ++g_tohpe_profiler.score_pair_count;
                 auto const z = table[i] + table[j];
                 if (!map.contains(z)) {
                     map[z] = 0;
                 }
                 map[z] += 2;
-                ++g_tohpe_profiler.score_map_updates;
             }
         }
 
-        auto max_score  = int{0};
+        int max_score   = 0;
         auto max_z      = dvlab::BooleanMatrix::Row(n_qubits);
         bool have_max_z = false;
 
@@ -526,11 +455,11 @@ Polynomial tohpe_once_fast_port(Polynomial const& polynomial, size_t max_moves =
         }
 
         if (max_score <= 0) {
-            tohpe_trace("fast_port", "nonpositive-score", fmt::format("move={} y={} best_score={}", move_idx, row_to_bitstring(y), max_score));
+            trace_iteration_tohpe("nonpositive-score", fmt::format("move={} y={} best_score={}", move_idx, row_to_bitstring(y), max_score));
             break;
         }
 
-        std::vector<unsigned char> to_update(y.begin(), y.begin() + static_cast<long>(n_terms));
+        std::vector<unsigned char> to_update{y.begin(), y.begin() + static_cast<long>(n_terms)};
         if (y_parity) {
             table.push_zeros_row();
             l_matrix_transpose.push_zeros_row();
@@ -544,8 +473,8 @@ Polynomial tohpe_once_fast_port(Polynomial const& polynomial, size_t max_moves =
             table[i] += max_z;
         }
 
-        std::unordered_map<dvlab::BooleanMatrix::Row, size_t, dvlab::BooleanMatrixRowHash> hashmap;
-        std::vector<size_t> to_remove;
+        std::unordered_map<dvlab::BooleanMatrix::Row, size_t, dvlab::BooleanMatrixRowHash> hashmap{};
+        std::vector<size_t> to_remove{};
         n_terms = table.num_rows();
         for (auto i : std::views::iota(0ul, n_terms)) {
             if (table[i].is_zeros()) {
@@ -560,7 +489,6 @@ Polynomial tohpe_once_fast_port(Polynomial const& polynomial, size_t max_moves =
             }
         }
         std::sort(to_remove.begin(), to_remove.end(), std::greater<size_t>());
-        g_tohpe_profiler.removed_rows += to_remove.size();
 
         for (auto const& i : to_remove) {
             clear_column(i, l_matrix_transpose, augmented_matrix, pivots);
@@ -600,7 +528,7 @@ Polynomial tohpe_once_fast_port(Polynomial const& polynomial, size_t max_moves =
             }
         }
 
-        std::vector<size_t> update_indices;
+        std::vector<size_t> update_indices{};
         update_indices.reserve(to_update.size());
         for (auto i : std::views::iota(0ul, to_update.size())) {
             if (to_update[i]) {
@@ -609,33 +537,30 @@ Polynomial tohpe_once_fast_port(Polynomial const& polynomial, size_t max_moves =
         }
         for (auto const i : update_indices) {
             clear_column(i, l_matrix_transpose, augmented_matrix, pivots);
-            {
-                ScopedNsTimer sub(g_tohpe_profiler.ns_rebuild_get_l_transpose);
-                l_matrix_transpose[i] = build_l_transpose_row_from_term(table[i], n_qubits);
-            }
+            l_matrix_transpose[i] = build_l_transpose_row_from_term(table[i], n_qubits);
             std::vector<unsigned char> bv(table.num_rows(), 0);
             bv[i] = 1;
             augmented_matrix[i].set_row(bv);
         }
 
-        auto const output = from_boolean_matrix(table);
-        tohpe_trace("fast_port", "move", fmt::format("move={} y={} z={} to_update={} to_remove={} pivots_before={} pivots_after={} output={}",
-                                                      move_idx, row_to_bitstring(y), row_to_bitstring(max_z),
-                                                      bytes_to_bitstring(to_update), summarize_indices(to_remove),
-                                                      pivots_before_move, pivots.size(),
-                                                      summarize_term_bitstrings(polynomial_term_bitstrings(output))));
+        auto output = from_boolean_matrix(table);
+        trace_iteration_tohpe("move", fmt::format("move={} y={} z={} to_update={} to_remove={} pivots_before={} pivots_after={} output={}",
+                                                  move_idx, row_to_bitstring(y), row_to_bitstring(max_z),
+                                                  bytes_to_bitstring(to_update), summarize_indices(to_remove),
+                                                  pivots_before_move, pivots.size(),
+                                                  summarize_term_bitstrings(polynomial_term_bitstrings(output))));
         ++move_idx;
         if (move_idx >= max_moves) {
             return output;
         }
     }
-    auto const output = from_boolean_matrix(table);
-    tohpe_trace("fast_port", "output", fmt::format("terms={}", summarize_term_bitstrings(polynomial_term_bitstrings(output))));
+    auto output = from_boolean_matrix(table);
+    trace_iteration_tohpe("output", fmt::format("terms={}", summarize_term_bitstrings(polynomial_term_bitstrings(output))));
     return output;
 }
 
 std::vector<std::pair<size_t, size_t>> build_pair_indices(size_t num_rows) {
-    std::vector<std::pair<size_t, size_t>> pairs;
+    std::vector<std::pair<size_t, size_t>> pairs{};
     pairs.reserve(num_rows * (num_rows + 1) / 2);
     for (size_t alpha = 0; alpha < num_rows; ++alpha) {
         for (size_t beta = alpha; beta < num_rows; ++beta) {
@@ -686,8 +611,8 @@ dvlab::BooleanMatrix::Row build_v(dvlab::BooleanMatrix::Row const& z, std::vecto
 }
 
 std::vector<dvlab::BooleanMatrix::Row> generate_candidate_z(dvlab::BooleanMatrix const& matrix) {
-    std::unordered_set<dvlab::BooleanMatrix::Row, dvlab::BooleanMatrixRowHash> candidates_set;
-    std::vector<dvlab::BooleanMatrix::Row> candidates;
+    std::unordered_set<dvlab::BooleanMatrix::Row, dvlab::BooleanMatrixRowHash> candidates_set{};
+    std::vector<dvlab::BooleanMatrix::Row> candidates{};
 
     for (size_t col_idx = 0; col_idx < matrix.num_cols(); ++col_idx) {
         dvlab::BooleanMatrix::Row z(matrix.num_rows());
@@ -720,7 +645,7 @@ std::vector<dvlab::BooleanMatrix::Row> iterate_nullspace_combinations(dvlab::Boo
         return {};
     }
 
-    std::vector<dvlab::BooleanMatrix::Row> combinations;
+    std::vector<dvlab::BooleanMatrix::Row> combinations{};
     size_t const num_basis    = nullspace.num_rows();
     size_t const vector_width = nullspace.num_cols();
 
@@ -767,10 +692,10 @@ std::optional<std::tuple<dvlab::BooleanMatrix::Row, dvlab::BooleanMatrix::Row, d
         return std::nullopt;
     }
 
-    size_t const num_rows = matrix.num_rows();
-    size_t const num_cols = matrix.num_cols();
+    size_t const num_rows   = matrix.num_rows();
+    size_t const num_cols   = matrix.num_cols();
     auto const pair_indices = build_pair_indices(num_rows);
-    auto const l_matrix = build_l(matrix, pair_indices);
+    auto const l_matrix     = build_l(matrix, pair_indices);
 
     auto const original_polynomial = from_boolean_matrix(dvlab::transpose(matrix));
     size_t const original_count    = original_polynomial.size();
@@ -833,7 +758,7 @@ Polynomial fasttodd_once(Polynomial const& polynomial) {
     Polynomial new_polynomial = polynomial;
     while (true) {
         auto const num_terms = new_polynomial.size();
-        new_polynomial       = tohpe_once_fast_port(new_polynomial, static_cast<size_t>(-1));
+        new_polynomial       = tohpe_once_iteration(new_polynomial, static_cast<size_t>(-1));
         if (new_polynomial.empty() || new_polynomial.size() == num_terms) {
             break;
         }
@@ -881,16 +806,16 @@ std::pair<StabilizerTableau, Polynomial> TohpePhasePolynomialOptimizationStrateg
 
     size_t move_idx = 0;
     while (true) {
-        auto const num_terms = ret_polynomial.size();
+        auto const num_terms     = ret_polynomial.size();
         auto const input_summary = summarize_term_bitstrings(polynomial_term_bitstrings(ret_polynomial));
-        std::optional<Polynomial> fast_port_polynomial;
+        std::optional<Polynomial> iteration_polynomial;
         if (tohpe_trace_compare_enabled()) {
-            fast_port_polynomial = tohpe_once_fast_port(ret_polynomial, 1);
+            iteration_polynomial = tohpe_once_iteration(ret_polynomial, 1);
         }
-        auto const slow_polynomial = tohpe_use_fast_port() ? tohpe_once_fast_port(ret_polynomial) : tohpe_once(ret_polynomial);
+        auto const slow_polynomial = tohpe_use_iteration() ? tohpe_once_iteration(ret_polynomial) : tohpe_once(ret_polynomial);
         if (tohpe_trace_compare_enabled()) {
             auto const slow_summary = summarize_term_bitstrings(polynomial_term_bitstrings(slow_polynomial));
-            auto const fast_summary = summarize_term_bitstrings(polynomial_term_bitstrings(*fast_port_polynomial));
+            auto const fast_summary = summarize_term_bitstrings(polynomial_term_bitstrings(*iteration_polynomial));
             auto const same_output  = slow_summary == fast_summary;
             tohpe_trace("compare", same_output ? "agree" : "diverge",
                         fmt::format("move={} input={} slow={} fast={}", move_idx, input_summary, slow_summary, fast_summary));
