@@ -1,0 +1,41 @@
+circuit,group,tier,n,heyfron_label,heyfron_pre_T,heyfron_todd_T,heyfron_todd_t,vandaele_pre_T,vandaele_todd_T,vandaele_todd_t,vandaele_fasttodd_T,file,notes
+adder_8,common,fast,24,8-bit adder,399,129,40914.1,173,172,3,170,benchmark/qc/optimized/adder_8_pyzx.qc,
+barenco_tof_3,common,fast,5,Barenco Toff (n=5),28,14,0.01,16,16,0,16,benchmark/qc/optimized/barenco_tof_3_pyzx.qc,
+barenco_tof_4,common,fast,7,Barenco Toff (n=7),56,24,0.45,28,28,0,28,benchmark/qc/optimized/barenco_tof_4_pyzx.qc,
+barenco_tof_5,common,fast,9,Barenco Toff (n=9),84,34,1.94,40,40,0,40,benchmark/qc/optimized/barenco_tof_5_pyzx.qc,
+barenco_tof_10,common,fast,19,Barenco Toff (n=19),224,84,460.33,100,100,0,100,benchmark/qc/optimized/barenco_tof_10_pyzx.qc,
+csla_mux_3,common,fast,15,CSLA-MUX3,70,52,30.41,62,50,0,49,benchmark/qc/optimized/csla_mux_3_original_pyzx.qc,Heyfron reports n=16
+csum_mux_9,common,fast,30,CSUM-MUX9,196,72,587.21,84,76,7,73,benchmark/qc/optimized/csum_mux_9_corrected_pyzx.qc,
+grover_5,common,fast,9,Grover5,52,44,17.07,166,166,0,166,benchmark/qc/optimized/grover_5_pyzx.qc,
+ham15-low,common,fast,17,Hamming15 (low),161,75,902.69,97,94,0,94,benchmark/qc/optimized/ham15-low_pyzx.qc,
+ham15-med,common,fast,17,Hamming15 (med),574,162,12410.8,212,212,1,212,benchmark/qc/optimized/ham15-med_pyzx.qc,
+hwb6,common,fast,7,HWB6,105,51,55.66,75,75,0,75,benchmark/qc/optimized/hwb6_pyzx.qc,
+mod5_4,common,fast,5,Mod 5_4,28,16,0.04,8,8,0,7,benchmark/qc/optimized/mod5_4_pyzx.qc,Vandaele values from Table 1 (gadgetized); circuit absent from Table 2
+mod_mult_55,common,fast,9,Mod-Mult55,49,17,0.26,35,28,0,28,benchmark/qc/optimized/mod_mult_55_pyzx.qc,
+mod_red_21,common,fast,11,Mod-Red21,119,55,25.78,73,73,0,73,benchmark/qc/optimized/mod_red_21_pyzx.qc,
+qcla_adder_10,common,fast,36,QCLA-Adder10,238,116,5496.66,162,161,53,161,benchmark/qc/optimized/qcla_adder_10_pyzx.qc,
+qcla_com_7,common,fast,24,QCLA-Com7,203,59,198.55,95,95,2,95,benchmark/qc/optimized/qcla_com_7_pyzx.qc,
+qcla_mod_7,common,fast,26,QCLA-Mod7,413,165,46574.3,237,237,7,237,benchmark/qc/optimized/qcla_mod_7_pyzx.qc,
+qft_4,common,fast,5,QFT4,69,55,93.65,67,66,0,66,benchmark/qc/optimized/qft_4_pyzx.qc,
+rc_adder_6,common,fast,14,RC-Adder6,77,37,18.72,47,47,0,47,benchmark/qc/optimized/rc_adder_6_pyzx.qc,
+tof_3,common,fast,5,NC Toff4,21,13,0.01,15,15,0,15,benchmark/qc/optimized/tof_3_pyzx.qc,
+tof_4,common,fast,7,NC Toff5,35,19,0.06,23,23,0,23,benchmark/qc/optimized/tof_4_pyzx.qc,
+tof_5,common,fast,9,NC Toff6,49,25,0.4,31,31,0,31,benchmark/qc/optimized/tof_5_pyzx.qc,
+tof_10,common,fast,19,NC Toff10,119,55,44.78,71,71,0,71,benchmark/qc/optimized/tof_10_pyzx.qc,
+vbe_adder_3,common,fast,10,VBE-Adder3,70,20,0.15,24,24,0,24,benchmark/qc/optimized/vbe_adder_3_pyzx.qc,
+gf2^4_mult,heyfron-only,fast,12,GF(2^4)-mult,112,54,8.88,,,,,benchmark/qc/optimized/gf2^4_mult_pyzx.qc,
+gf2^5_mult,heyfron-only,fast,15,GF(2^5)-mult,175,87,66.83,,,,,benchmark/qc/optimized/gf2^5_mult_pyzx.qc,
+gf2^6_mult,heyfron-only,fast,18,GF(2^6)-mult,252,126,521.86,,,,,benchmark/qc/optimized/gf2^6_mult_pyzx.qc,
+gf2^7_mult,heyfron-only,fast,21,GF(2^7)-mult,343,189,2541.4,,,,,benchmark/qc/optimized/gf2^7_mult_pyzx.qc,
+gf2^8_mult,heyfron-only,slow,24,GF(2^8)-mult,448,230,36335.7,,,,,benchmark/qc/optimized/gf2^8_mult_pyzx.qc,
+gf2^9_mult,heyfron-only,slow,27,GF(2^9)-mult,567,295,50671.1,,,,,benchmark/qc/optimized/gf2^9_mult_pyzx.qc,
+gf2^10_mult,heyfron-only,slow,30,GF(2^10)-mult,700,350,15860.3,,,,,benchmark/qc/optimized/gf2^10_mult_pyzx.qc,Heyfron time from faster but less stable TODD variant
+gf2^16_mult,heyfron-only,slow,48,GF(2^16)-mult,1792,,,,,,,benchmark/qc/optimized/gf2^16_mult_pyzx.qc,Heyfron TODD did not finish; no T-count reported
+nth_prime6,heyfron-only,slow,9,nth-prime6,567,208,37348,,,,,benchmark/qc/optimized/nth_prime6_pyzx.qc,Heyfron time from faster but less stable TODD variant
+DEFAULT,vandaele-only,slow,640,,,,,39744,39744,,39666,benchmark/qc/vandaele2024/default.qc,Block cipher DEFAULT; Vandaele TODD/FastTODD stopped at 24 h
+ham15-high,vandaele-only,slow,20,,,,,1019,1019,1,1019,benchmark/qc/optimized/ham15-high_pyzx.qc,
+hwb8,vandaele-only,slow,12,,,,,3517,3493,2,3487,benchmark/qc/optimized/hwb8_pyzx.qc,
+hwb10,vandaele-only,slow,16,,,,,15891,15698,14,15693,benchmark/qc/vandaele2024/hwb10.qc,
+hwb11,vandaele-only,slow,15,,,,,44500,44191,28,44188,benchmark/qc/vandaele2024/hwb11.qc,
+hwb12,vandaele-only,skip,20,,,,,85611,85239,135,85233,,No circuit file in this repo nor in Vandaele's public repo
+mod_adder_1024,vandaele-only,slow,28,,,,,1011,1010,13,1009,benchmark/qc/optimized/mod_adder_1024_pyzx.qc,
