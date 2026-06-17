@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
-# Run the qsyn TODD pipeline on one benchmark circuit and append a CSV row.
+# Run the qsyn FastTODD pipeline (tmerge -> hopt -> phasepoly fasttodd, the
+# no-ancilla Vandaele-comparable path) on one benchmark circuit and append a
+# CSV row.
 #
 # Usage: todd-benchmark.sh <circuit-name> [timeout-seconds]
 #
@@ -71,7 +73,7 @@ START=$(date +%s)
 # so a plain `timeout` would hang forever once it sends SIGTERM. `-k 30`
 # escalates to SIGKILL (uncatchable) 30s later, guaranteeing the cap holds.
 timeout -k 30 "$TIMEOUT" "$QSYN" -q --no-version -c \
-	"qcir read $QC_FILE; qcir print --stat; convert qcir tableau; tableau optimize full; convert tableau qcir; qcir print --stat; qcir equiv 0 1; quit -f" \
+	"qcir read $QC_FILE; qcir print --stat; convert qcir tableau; tableau optimize tmerge; tableau optimize hopt; tableau optimize phasepoly fasttodd; convert tableau qcir; qcir print --stat; qcir equiv 0 1; quit -f" \
 	>"$LOG" 2>&1
 RC=$?
 WALL=$(($(date +%s) - START))
