@@ -1,0 +1,6 @@
+qcir read tests/tableau/circuits/tof_3.qc
+convert qcir tableau
+tableau optimize phasepoly fasttodd
+convert tableau qcir
+qcir print --stat
+qcir equiv 0 1
