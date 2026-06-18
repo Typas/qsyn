@@ -1,0 +1,8 @@
+qcir read tests/tableau/circuits/gf2^5_mult.qc
+convert qcir tableau
+tableau optimize tmerge
+tableau optimize hopt
+tableau optimize phasepoly fasttodd
+convert tableau qcir
+qcir print --stat
+qcir equiv 0 1
