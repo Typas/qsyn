@@ -1,0 +1,155 @@
+circuit,run,n,T,seconds,status,note
+DEFAULT,qsyn_pyzx,640,NA,1913,TLE,
+DEFAULT,qsyn_raw,640,NA,1916,TLE,
+DEFAULT,vand_pyzx,640,NA,175,MLE,
+DEFAULT,vand_raw,640,NA,119,MLE,
+adder_8,qsyn_pyzx,24,173,0,ok,
+adder_8,qsyn_raw,24,170,0,ok,
+adder_8,vand_pyzx,24,NA,0,NA,Operator not implemented: Tof
+adder_8,vand_raw,24,119,0,ok,
+barenco_tof_10,qsyn_pyzx,19,100,0,ok,
+barenco_tof_10,qsyn_raw,19,100,0,ok,
+barenco_tof_10,vand_pyzx,19,NA,0,NA,Operator not implemented: Z
+barenco_tof_10,vand_raw,19,83,0,ok,
+barenco_tof_3,qsyn_pyzx,5,16,0,ok,
+barenco_tof_3,qsyn_raw,5,16,0,ok,
+barenco_tof_3,vand_pyzx,5,NA,0,NA,Operator not implemented: Z
+barenco_tof_3,vand_raw,5,13,0,ok,
+barenco_tof_4,qsyn_pyzx,7,28,0,ok,
+barenco_tof_4,qsyn_raw,7,28,0,ok,
+barenco_tof_4,vand_pyzx,7,NA,0,NA,Operator not implemented: Z
+barenco_tof_4,vand_raw,7,23,0,ok,
+barenco_tof_5,qsyn_pyzx,9,40,0,ok,
+barenco_tof_5,qsyn_raw,9,40,0,ok,
+barenco_tof_5,vand_pyzx,9,NA,0,NA,Operator not implemented: Z
+barenco_tof_5,vand_raw,9,33,0,ok,
+csla_mux_3,qsyn_pyzx,15,51,0,ok,
+csla_mux_3,qsyn_raw,15,53,0,ok,
+csla_mux_3,vand_pyzx,15,NA,0,NA,Operator not implemented: Z
+csla_mux_3,vand_raw,15,39,0,ok,
+csum_mux_9,qsyn_pyzx,30,75,0,ok,
+csum_mux_9,qsyn_raw,30,75,0,ok,
+csum_mux_9,vand_pyzx,30,NA,0,NA,Operator not implemented: Z
+csum_mux_9,vand_raw,30,71,0,ok,
+gf2^10_mult,qsyn_pyzx,30,293,486,ok,
+gf2^10_mult,qsyn_raw,30,315,205,ok,
+gf2^10_mult,vand_pyzx,30,NA,0,NA,Operator not implemented: Z
+gf2^10_mult,vand_raw,30,315,5,ok,
+gf2^16_mult,qsyn_pyzx,48,NA,1910,TLE,
+gf2^16_mult,qsyn_raw,48,NA,1909,TLE,
+gf2^16_mult,vand_pyzx,48,NA,0,NA,Operator not implemented: Z
+gf2^16_mult,vand_raw,48,797,172,ok,
+gf2^4_mult,qsyn_pyzx,12,49,1,ok,
+gf2^4_mult,qsyn_raw,12,49,1,ok,
+gf2^4_mult,vand_pyzx,12,NA,0,NA,Operator not implemented: Z
+gf2^4_mult,vand_raw,12,49,0,ok,
+gf2^5_mult,qsyn_pyzx,15,77,1,ok,
+gf2^5_mult,qsyn_raw,15,75,1,ok,
+gf2^5_mult,vand_pyzx,15,NA,0,NA,Operator not implemented: Z
+gf2^5_mult,vand_raw,15,81,0,ok,
+gf2^6_mult,qsyn_pyzx,18,113,5,ok,
+gf2^6_mult,qsyn_raw,18,115,5,ok,
+gf2^6_mult,vand_pyzx,18,NA,0,NA,Operator not implemented: Z
+gf2^6_mult,vand_raw,18,113,0,ok,
+gf2^7_mult,qsyn_pyzx,21,149,17,ok,
+gf2^7_mult,qsyn_raw,21,147,21,ok,
+gf2^7_mult,vand_pyzx,21,NA,0,NA,Operator not implemented: Z
+gf2^7_mult,vand_raw,21,155,1,ok,
+gf2^8_mult,qsyn_pyzx,24,203,69,ok,
+gf2^8_mult,qsyn_raw,24,201,41,ok,
+gf2^8_mult,vand_pyzx,24,NA,0,NA,Operator not implemented: Z
+gf2^8_mult,vand_raw,24,205,1,ok,
+gf2^9_mult,qsyn_pyzx,27,259,194,ok,
+gf2^9_mult,qsyn_raw,27,255,197,ok,
+gf2^9_mult,vand_pyzx,27,NA,0,NA,Operator not implemented: Z
+gf2^9_mult,vand_raw,27,257,2,ok,
+grover_5,qsyn_pyzx,9,166,0,ok,
+grover_5,qsyn_raw,9,166,0,ok,
+grover_5,vand_pyzx,9,NA,0,NA,Operator not implemented: Tof
+grover_5,vand_raw,9,143,2,ok,
+ham15-high,qsyn_pyzx,20,1015,0,ok,
+ham15-high,qsyn_raw,20,1011,0,ok,
+ham15-high,vand_pyzx,20,NA,0,NA,Operator not implemented: Z
+ham15-high,vand_raw,20,NA,1951,TLE,
+ham15-low,qsyn_pyzx,17,96,0,ok,
+ham15-low,qsyn_raw,17,97,0,ok,
+ham15-low,vand_pyzx,17,NA,0,NA,Operator not implemented: Tof
+ham15-low,vand_raw,17,77,0,ok,
+ham15-med,qsyn_pyzx,17,212,0,ok,
+ham15-med,qsyn_raw,17,212,0,ok,
+ham15-med,vand_pyzx,17,NA,0,NA,Operator not implemented: Tof
+ham15-med,vand_raw,17,137,8,ok,
+hwb10,qsyn_pyzx,16,15816,11,ok,
+hwb10,qsyn_raw,16,15816,11,ok,
+hwb10,vand_pyzx,16,NA,82,MLE,
+hwb10,vand_raw,16,NA,133,MLE,
+hwb11,qsyn_pyzx,15,44356,52,ok,
+hwb11,qsyn_raw,15,44356,54,ok,
+hwb11,vand_pyzx,15,NA,125,MLE,
+hwb11,vand_raw,15,NA,126,MLE,
+hwb6,qsyn_pyzx,7,72,0,ok,
+hwb6,qsyn_raw,7,72,0,ok,
+hwb6,vand_pyzx,7,NA,0,NA,Operator not implemented: Tof
+hwb6,vand_raw,7,51,0,ok,
+hwb8,qsyn_pyzx,12,3510,1,ok,
+hwb8,qsyn_raw,12,3502,1,ok,
+hwb8,vand_pyzx,12,NA,0,NA,Operator not implemented: Tof
+hwb8,vand_raw,12,NA,1948,TLE,
+mod5_4,qsyn_pyzx,5,7,1,ok,
+mod5_4,qsyn_raw,5,7,0,ok,
+mod5_4,vand_pyzx,5,NA,0,NA,Operator not implemented: Z
+mod5_4,vand_raw,5,7,0,ok,
+mod_adder_1024,qsyn_pyzx,28,1010,0,ok,
+mod_adder_1024,qsyn_raw,28,1009,1,ok,
+mod_adder_1024,vand_pyzx,28,NA,0,NA,Operator not implemented: Tof
+mod_adder_1024,vand_raw,28,NA,1950,TLE,
+mod_mult_55,qsyn_pyzx,9,35,0,ok,
+mod_mult_55,qsyn_raw,9,32,0,ok,
+mod_mult_55,vand_pyzx,9,NA,0,NA,Operator not implemented: Z
+mod_mult_55,vand_raw,9,17,0,ok,
+mod_red_21,qsyn_pyzx,11,73,0,ok,
+mod_red_21,qsyn_raw,11,73,0,ok,
+mod_red_21,vand_pyzx,11,NA,0,NA,Operator not implemented: Z
+mod_red_21,vand_raw,11,51,0,ok,
+nth_prime6,qsyn_pyzx,9,279,0,ok,
+nth_prime6,vand_pyzx,9,NA,0,NA,Operator not implemented: Z
+qcla_adder_10,qsyn_pyzx,36,155,0,ok,
+qcla_adder_10,qsyn_raw,36,156,0,ok,
+qcla_adder_10,vand_pyzx,36,NA,0,NA,Operator not implemented: Z
+qcla_adder_10,vand_raw,36,109,2,ok,
+qcla_com_7,qsyn_pyzx,24,95,0,ok,
+qcla_com_7,qsyn_raw,24,95,0,ok,
+qcla_com_7,vand_pyzx,24,NA,0,NA,Operator not implemented: Z
+qcla_com_7,vand_raw,24,59,0,ok,
+qcla_mod_7,qsyn_pyzx,26,233,0,ok,
+qcla_mod_7,qsyn_raw,26,236,0,ok,
+qcla_mod_7,vand_pyzx,26,NA,0,NA,Operator not implemented: Z
+qcla_mod_7,vand_raw,26,159,14,ok,
+qft_4,qsyn_pyzx,5,67,0,ok,
+qft_4,qsyn_raw,5,NA,0,ERR,rc=0
+qft_4,vand_pyzx,5,NA,0,NA,Operator not implemented: Tof
+qft_4,vand_raw,5,53,0,ok,
+rc_adder_6,qsyn_pyzx,14,47,0,ok,
+rc_adder_6,qsyn_raw,14,47,0,ok,
+rc_adder_6,vand_pyzx,14,NA,0,NA,Operator not implemented: Tof
+rc_adder_6,vand_raw,14,37,0,ok,
+tof_10,qsyn_pyzx,19,71,0,ok,
+tof_10,qsyn_raw,19,71,0,ok,
+tof_10,vand_pyzx,19,NA,0,NA,Operator not implemented: Z
+tof_10,vand_raw,19,55,0,ok,
+tof_3,qsyn_pyzx,5,15,0,ok,
+tof_3,qsyn_raw,5,15,0,ok,
+tof_3,vand_pyzx,5,NA,0,NA,Operator not implemented: Z
+tof_3,vand_raw,5,13,0,ok,
+tof_4,qsyn_pyzx,7,23,0,ok,
+tof_4,qsyn_raw,7,23,0,ok,
+tof_4,vand_pyzx,7,NA,0,NA,Operator not implemented: Z
+tof_4,vand_raw,7,19,0,ok,
+tof_5,qsyn_pyzx,9,31,0,ok,
+tof_5,qsyn_raw,9,31,0,ok,
+tof_5,vand_pyzx,9,NA,0,NA,Operator not implemented: Z
+tof_5,vand_raw,9,25,0,ok,
+vbe_adder_3,qsyn_pyzx,10,24,0,ok,
+vbe_adder_3,qsyn_raw,10,24,0,ok,
+vbe_adder_3,vand_pyzx,10,NA,0,NA,Operator not implemented: Z
+vbe_adder_3,vand_raw,10,19,0,ok,
