@@ -34,30 +34,6 @@ using namespace signature;
 using namespace qsyn::tableau;
 
 namespace {
-bool tohpe_trace_enabled() {
-    static bool const enabled = [] {
-        auto const* raw = std::getenv("QSYN_TOHPE_TRACE");
-        return raw != nullptr && *raw == '1';
-    }();
-    return enabled;
-}
-
-bool tohpe_trace_compare_enabled() {
-    static bool const enabled = [] {
-        auto const* raw = std::getenv("QSYN_TOHPE_TRACE_COMPARE");
-        return raw != nullptr && *raw == '1';
-    }();
-    return enabled;
-}
-
-bool tohpe_trace_stop_on_divergence() {
-    static bool const enabled = [] {
-        auto const* raw = std::getenv("QSYN_TOHPE_TRACE_STOP_ON_DIVERGENCE");
-        return raw != nullptr && *raw == '1';
-    }();
-    return enabled;
-}
-
 bool tohpe_use_iteration() {
     static bool const enabled = [] {
         auto const* raw = std::getenv("QSYN_TOHPE_USE_ITERATION");
@@ -65,57 +41,6 @@ bool tohpe_use_iteration() {
         return *raw != '0';
     }();
     return enabled;
-}
-
-std::string row_to_bitstring(dvlab::BooleanMatrix::Row const& row) {
-    std::string bits;
-    bits.reserve(row.size());
-    for (auto const bit : row) {
-        bits.push_back(bit ? '1' : '0');
-    }
-    return bits;
-}
-
-std::string bytes_to_bitstring(std::vector<unsigned char> const& bits) {
-    std::string ret;
-    ret.reserve(bits.size());
-    for (auto const bit : bits) {
-        ret.push_back(bit ? '1' : '0');
-    }
-    return ret;
-}
-
-std::vector<std::string> polynomial_term_bitstrings(Polynomial const& polynomial) {
-    if (polynomial.empty()) {
-        return {};
-    }
-    auto const table = dvlab::transpose(load_phase_poly_matrix(polynomial));
-    auto ret         = std::vector<std::string>{};
-    ret.reserve(table.num_rows());
-    for (auto const& row : table) {
-        ret.emplace_back(row_to_bitstring(row));
-    }
-    std::sort(ret.begin(), ret.end());
-    return ret;
-}
-
-std::string summarize_term_bitstrings(std::vector<std::string> const& terms) {
-    return fmt::format("[{}]", fmt::join(terms, ","));
-}
-
-std::string summarize_indices(std::vector<size_t> const& indices) {
-    return fmt::format("[{}]", fmt::join(indices, ","));
-}
-
-void tohpe_trace(std::string_view impl, std::string_view stage, std::string const& message) {
-    if (!tohpe_trace_enabled()) return;
-    fmt::println("[TOHPE_TRACE] impl={} stage={} {}", impl, stage, message);
-}
-
-constexpr std::string_view k_iteration_tohpe_trace_name = "iteration";
-
-void trace_iteration_tohpe(std::string_view stage, std::string const& message) {
-    tohpe_trace(k_iteration_tohpe_trace_name, stage, message);
 }
 
 /**
@@ -136,8 +61,7 @@ dvlab::BooleanMatrix::Row kernel(dvlab::BooleanMatrix& matrix, dvlab::BooleanMat
         }
 
         if (matrix[i].is_zeros()) {
-            spdlog::debug("matrix[{}] is zero, return:", i);
-            augmented_matrix[i].print_row();
+            spdlog::debug("matrix[{}] is zero, return", i);
             return augmented_matrix[i];
         }
         size_t const first_one_idx = std::distance(matrix[i].begin(), std::find(matrix[i].begin(), matrix[i].end(), true));
@@ -338,11 +262,8 @@ Polynomial tohpe_once(Polynomial const& polynomial) {
     auto const s_matrices           = get_s_matrices(phase_poly_matrix, z_matrix);
     auto const nullspace_transposed = get_nullspace_transposed(l_matrix);
 
-    tohpe_trace("slow", "input", fmt::format("terms={}", summarize_term_bitstrings(polynomial_term_bitstrings(polynomial))));
-
     // check if y satisfies tohpe condition
     if (nullspace_transposed.is_empty()) {
-        tohpe_trace("slow", "no-nullspace", "nullspace is empty");
         return polynomial;
     }
 
@@ -380,15 +301,11 @@ Polynomial tohpe_once(Polynomial const& polynomial) {
             if (y.sum() % 2 == 1) {
                 phase_poly_matrix_copy.push_row(chosen_z);
             }
-            auto output = from_boolean_matrix(phase_poly_matrix_copy);
-            tohpe_trace("slow", "move", fmt::format("y={} z={} output={}", row_to_bitstring(y), row_to_bitstring(chosen_z), summarize_term_bitstrings(polynomial_term_bitstrings(output))));
-            return output;
+            return from_boolean_matrix(phase_poly_matrix_copy);
         }
     }
     // no candidate, return same matrix
-    auto output = from_boolean_matrix(dvlab::transpose(phase_poly_matrix_copy));
-    tohpe_trace("slow", "no-candidate", fmt::format("output={}", summarize_term_bitstrings(polynomial_term_bitstrings(output))));
-    return output;
+    return from_boolean_matrix(dvlab::transpose(phase_poly_matrix_copy));
 }
 
 Polynomial tohpe_once_iteration(Polynomial const& polynomial, size_t max_moves = static_cast<size_t>(-1)) {
@@ -408,17 +325,13 @@ Polynomial tohpe_once_iteration(Polynomial const& polynomial, size_t max_moves =
     dvlab::BooleanMatrix augmented_matrix = dvlab::identity(table.num_rows());
     std::unordered_map<size_t, size_t> pivots;
 
-    trace_iteration_tohpe("input", fmt::format("terms={}", summarize_term_bitstrings(polynomial_term_bitstrings(polynomial))));
-
     size_t move_idx = 0;
     while (true) {
         spdlog::trace("loop {}", move_idx);
-        auto n_terms                  = table.num_rows();
-        dvlab::BooleanMatrix::Row y   = kernel(l_matrix_transpose, augmented_matrix, pivots);
-        auto const pivots_before_move = pivots.size();
+        auto n_terms                = table.num_rows();
+        dvlab::BooleanMatrix::Row y = kernel(l_matrix_transpose, augmented_matrix, pivots);
         if (y.is_zeros()) {
             spdlog::trace("No y is found, end tohpe.");
-            trace_iteration_tohpe("no-y", fmt::format("move={} pivots={}", move_idx, pivots_before_move));
             break;
         }
 
@@ -455,7 +368,6 @@ Polynomial tohpe_once_iteration(Polynomial const& polynomial, size_t max_moves =
         }
 
         if (max_score <= 0) {
-            trace_iteration_tohpe("nonpositive-score", fmt::format("move={} y={} best_score={}", move_idx, row_to_bitstring(y), max_score));
             break;
         }
 
@@ -543,211 +455,185 @@ Polynomial tohpe_once_iteration(Polynomial const& polynomial, size_t max_moves =
             augmented_matrix[i].set_row(bv);
         }
 
-        auto output = from_boolean_matrix(table);
-        trace_iteration_tohpe("move", fmt::format("move={} y={} z={} to_update={} to_remove={} pivots_before={} pivots_after={} output={}",
-                                                  move_idx, row_to_bitstring(y), row_to_bitstring(max_z),
-                                                  bytes_to_bitstring(to_update), summarize_indices(to_remove),
-                                                  pivots_before_move, pivots.size(),
-                                                  summarize_term_bitstrings(polynomial_term_bitstrings(output))));
         ++move_idx;
         if (move_idx >= max_moves) {
-            return output;
+            return from_boolean_matrix(table);
         }
     }
-    auto output = from_boolean_matrix(table);
-    trace_iteration_tohpe("output", fmt::format("terms={}", summarize_term_bitstrings(polynomial_term_bitstrings(output))));
-    return output;
+    return from_boolean_matrix(table);
 }
 
-std::vector<std::pair<size_t, size_t>> build_pair_indices(size_t num_rows) {
-    std::vector<std::pair<size_t, size_t>> pairs{};
-    pairs.reserve(num_rows * (num_rows + 1) / 2);
-    for (size_t alpha = 0; alpha < num_rows; ++alpha) {
-        for (size_t beta = alpha; beta < num_rows; ++beta) {
-            pairs.emplace_back(alpha, beta);
-        }
+/**
+ * @brief One FastTODD move (Vandaele Algorithm 3 / Theorem 6, Eq. 84-92).
+ *
+ * Mirrors the reference `fast_todd` inner body
+ * (quantum-circuit-optimization/src/t_opt.rs:228-373): the reduced
+ * column-echelon form of L is computed *once* via `kernel`; for each candidate
+ * z = P_i ⊕ P_j the X^(z)/v^(z) columns are reduced against that echelon form
+ * (Eq. 86-92) and the solution y is read straight off the augmented matrix
+ * (Eq. 90). The (z, y) pair maximizing the Eq. 85 objective is applied (argmax,
+ * Alg. 3 line 11). Returns nullopt when no move reduces the term count.
+ */
+std::optional<Polynomial> fast_todd_move(Polynomial const& polynomial) {
+    if (polynomial.empty()) {
+        return std::nullopt;
     }
-    return pairs;
-}
+    auto const n_qubits = polynomial.front().n_qubits();
 
-dvlab::BooleanMatrix build_l(dvlab::BooleanMatrix const& matrix, std::vector<std::pair<size_t, size_t>> const& pair_indices) {
-    dvlab::BooleanMatrix l_matrix;
-    l_matrix.reserve(pair_indices.size(), matrix.num_cols());
-    for (auto const& [alpha, beta] : pair_indices) {
-        dvlab::BooleanMatrix::Row row(matrix.num_cols());
-        for (size_t col = 0; col < matrix.num_cols(); ++col) {
-            row[col] = matrix[alpha][col] & matrix[beta][col];
-        }
-        l_matrix.push_row(row);
-    }
-    return l_matrix;
-}
-
-dvlab::BooleanMatrix build_x(dvlab::BooleanMatrix::Row const& z, std::vector<std::pair<size_t, size_t>> const& pair_indices, size_t num_rows) {
-    dvlab::BooleanMatrix x_matrix;
-    x_matrix.reserve(pair_indices.size(), num_rows);
-    for (auto const& [alpha, beta] : pair_indices) {
-        dvlab::BooleanMatrix::Row row(num_rows, 0);
-        if (alpha != beta) {
-            if (z[alpha] == 1) {
-                row[beta] = 1;
-            }
-            if (z[beta] == 1) {
-                row[alpha] = 1;
-            }
-        }
-        x_matrix.push_row(row);
-    }
-    return x_matrix;
-}
-
-dvlab::BooleanMatrix::Row build_v(dvlab::BooleanMatrix::Row const& z, std::vector<std::pair<size_t, size_t>> const& pair_indices) {
-    dvlab::BooleanMatrix::Row v(pair_indices.size());
-    for (size_t idx = 0; idx < pair_indices.size(); ++idx) {
-        auto const& [alpha, beta] = pair_indices[idx];
-        v[idx]                    = z[alpha] & z[beta];
-    }
-    return v;
-}
-
-std::vector<dvlab::BooleanMatrix::Row> generate_candidate_z(dvlab::BooleanMatrix const& matrix) {
-    std::unordered_set<dvlab::BooleanMatrix::Row, dvlab::BooleanMatrixRowHash> candidates_set{};
-    std::vector<dvlab::BooleanMatrix::Row> candidates{};
-
-    for (size_t col_idx = 0; col_idx < matrix.num_cols(); ++col_idx) {
-        dvlab::BooleanMatrix::Row z(matrix.num_rows());
-        for (size_t row = 0; row < matrix.num_rows(); ++row) {
-            z[row] = matrix[row][col_idx];
-        }
-        if (!z.is_zeros() && !candidates_set.contains(z)) {
-            candidates_set.insert(z);
-            candidates.push_back(z);
-        }
-    }
-
-    auto const idx_vec = std::views::iota(0ul, matrix.num_cols()) | tl::to<std::vector>();
-    for (auto const& [i, j] : dvlab::combinations<2>(idx_vec)) {
-        dvlab::BooleanMatrix::Row z(matrix.num_rows());
-        for (size_t row = 0; row < matrix.num_rows(); ++row) {
-            z[row] = matrix[row][i] ^ matrix[row][j];
-        }
-        if (!z.is_zeros() && !candidates_set.contains(z)) {
-            candidates_set.insert(z);
-            candidates.push_back(z);
-        }
-    }
-
-    return candidates;
-}
-
-std::vector<dvlab::BooleanMatrix::Row> iterate_nullspace_combinations(dvlab::BooleanMatrix const& nullspace) {
-    if (nullspace.is_empty()) {
-        return {};
-    }
-
-    std::vector<dvlab::BooleanMatrix::Row> combinations{};
-    size_t const num_basis    = nullspace.num_rows();
-    size_t const vector_width = nullspace.num_cols();
-
-    for (size_t mask = 1; mask < (1ULL << num_basis); ++mask) {
-        dvlab::BooleanMatrix::Row combo(vector_width, 0);
-        size_t bitmask = mask;
-        size_t idx     = 0;
-        while (bitmask > 0) {
-            if (bitmask & 1) {
-                for (size_t i = 0; i < vector_width; ++i) {
-                    combo[i] ^= nullspace[idx][i];
-                }
-            }
-            bitmask >>= 1;
-            ++idx;
-        }
-        combinations.push_back(combo);
-    }
-
-    return combinations;
-}
-
-dvlab::BooleanMatrix apply_rank1_update(dvlab::BooleanMatrix const& matrix, dvlab::BooleanMatrix::Row const& z, dvlab::BooleanMatrix::Row const& y) {
-    dvlab::BooleanMatrix new_matrix = matrix;
-
-    for (size_t row = 0; row < matrix.num_rows(); ++row) {
-        for (size_t col = 0; col < matrix.num_cols(); ++col) {
-            new_matrix[row][col] ^= (z[row] & y[col]);
-        }
-    }
-
-    if (y.sum() % 2 == 1) {
-        new_matrix.push_zeros_column();
-        for (size_t row = 0; row < matrix.num_rows(); ++row) {
-            new_matrix[row][new_matrix.num_cols() - 1] = z[row];
-        }
-    }
-
-    return new_matrix;
-}
-
-std::optional<std::tuple<dvlab::BooleanMatrix::Row, dvlab::BooleanMatrix::Row, dvlab::BooleanMatrix>> fast_todd_iteration(dvlab::BooleanMatrix const& matrix) {
-    if (matrix.is_empty()) {
+    // table: one row per term, each row a parity over qubits.
+    auto table         = dvlab::transpose(load_phase_poly_matrix(polynomial));
+    auto const n_terms = table.num_rows();
+    if (n_terms == 0) {
         return std::nullopt;
     }
 
-    size_t const num_rows   = matrix.num_rows();
-    size_t const num_cols   = matrix.num_cols();
-    auto const pair_indices = build_pair_indices(num_rows);
-    auto const l_matrix     = build_l(matrix, pair_indices);
+    size_t const width = n_qubits + n_qubits * (n_qubits - 1) / 2;
 
-    auto const original_polynomial = from_boolean_matrix(dvlab::transpose(matrix));
-    size_t const original_count    = original_polynomial.size();
+    // Reduced column-echelon form of L (encoded as rows of Lᵀ), computed once.
+    dvlab::BooleanMatrix matrix;
+    matrix.reserve(n_terms, width);
+    for (auto i : std::views::iota(0ul, n_terms)) {
+        matrix.push_row(build_l_transpose_row_from_term(table[i], n_qubits));
+    }
+    auto augmented = dvlab::identity(n_terms);
+    std::unordered_map<size_t, size_t> pivots;  // term-row -> pivot column
+    kernel(matrix, augmented, pivots);          // ignore returned kernel vector; reuse pivots/echelon
 
-    std::optional<std::tuple<dvlab::BooleanMatrix::Row, dvlab::BooleanMatrix::Row, dvlab::BooleanMatrix>> best_result;
+    std::unordered_map<size_t, size_t> pivot_col_to_row;
+    pivot_col_to_row.reserve(pivots.size());
+    for (auto const& [row, col] : pivots) {
+        pivot_col_to_row[col] = row;
+    }
 
-    for (auto const& z : generate_candidate_z(matrix)) {
-        if (stop_requested()) {
-            return best_result;
+    std::unordered_map<dvlab::BooleanMatrix::Row, size_t, dvlab::BooleanMatrixRowHash> term_index;
+    term_index.reserve(n_terms);
+    for (auto i : std::views::iota(0ul, n_terms)) {
+        term_index[table[i]] = i;
+    }
+
+    // qsyn quadratic-block index for pair (a < b), matching build_l_transpose_row_from_term.
+    auto const quad_pos = [n_qubits](size_t a, size_t b) {
+        return n_qubits + (a * n_qubits - a * (a + 1) / 2 + b - a - 1);
+    };
+    // Reduce a column in L-position space against the precomputed echelon form,
+    // accumulating the corresponding term-combination (candidate y) into aug.
+    auto const reduce = [&](dvlab::BooleanMatrix::Row& col, dvlab::BooleanMatrix::Row& aug) {
+        for (auto const& [pivot_col, row] : pivot_col_to_row) {
+            if (col[pivot_col]) {
+                col += matrix[row];
+                aug += augmented[row];
+            }
         }
+    };
 
-        auto const x_matrix = build_x(z, pair_indices, num_rows);
-        auto const v        = build_v(z, pair_indices);
+    int max_score = 0;
+    dvlab::BooleanMatrix::Row best_z(0);
+    dvlab::BooleanMatrix::Row best_y(0);
+    bool have_best = false;
 
-        dvlab::BooleanMatrix v_col(v.size(), 1);
-        for (size_t i = 0; i < v.size(); ++i) {
-            v_col[i][0] = v[i];
-        }
+    for (auto i : std::views::iota(0ul, n_terms)) {
+        if (stop_requested()) break;
+        for (auto j : std::views::iota(i + 1, n_terms)) {
+            auto z = table[i];
+            z += table[j];  // z = P_i ⊕ P_j over qubits
 
-        auto const constraint = hstack(l_matrix, x_matrix, v_col);
-        auto const nullspace  = get_nullspace_transposed(constraint);
+            std::vector<dvlab::BooleanMatrix::Row> r_mat;
+            std::vector<dvlab::BooleanMatrix::Row> aug_r;
+            r_mat.reserve(n_qubits + 1);
+            aug_r.reserve(n_qubits + 1);
 
-        if (nullspace.is_empty()) {
-            continue;
-        }
-
-        for (auto const& solution : iterate_nullspace_combinations(nullspace)) {
-            if (solution.size() != num_cols + num_rows + 1) {
-                continue;
+            // X^(z) columns: X_{αβ,γ} = z_α δ_{βγ} ⊕ z_β δ_{αγ} (Eq. 64), off-diagonal only.
+            for (auto k : std::views::iota(0ul, n_qubits)) {
+                dvlab::BooleanMatrix::Row col(width, 0);
+                dvlab::BooleanMatrix::Row aug(n_terms, 0);
+                for (auto a : std::views::iota(0ul, n_qubits)) {
+                    for (auto b : std::views::iota(a + 1, n_qubits)) {
+                        if ((k == a && z[b]) || (k == b && z[a])) {
+                            col[quad_pos(a, b)] ^= 1;
+                        }
+                    }
+                }
+                reduce(col, aug);
+                r_mat.push_back(std::move(col));
+                aug_r.push_back(std::move(aug));
+            }
+            // v^(z) column: v_{αβ} = z_α ∧ z_β (Eq. 65); diagonal v_{αα} = z_α.
+            {
+                dvlab::BooleanMatrix::Row col(width, 0);
+                dvlab::BooleanMatrix::Row aug(n_terms, 0);
+                for (auto a : std::views::iota(0ul, n_qubits)) {
+                    for (auto b : std::views::iota(a + 1, n_qubits)) {
+                        if (z[a] && z[b]) {
+                            col[quad_pos(a, b)] ^= 1;
+                        }
+                    }
+                }
+                for (auto a : std::views::iota(0ul, n_qubits)) {
+                    if (z[a]) {
+                        col[a] ^= 1;
+                    }
+                }
+                reduce(col, aug);
+                r_mat.push_back(std::move(col));
+                aug_r.push_back(std::move(aug));
             }
 
-            dvlab::BooleanMatrix::Row y(num_cols);
-            for (size_t i = 0; i < num_cols; ++i) {
-                y[i] = solution[i];
-            }
+            // Gaussian elimination among the n+1 reduced columns; a zero column is a
+            // null combination whose accumulated term-combination is a candidate y.
+            for (auto k : std::views::iota(0ul, r_mat.size())) {
+                if (!r_mat[k].is_zeros()) {
+                    size_t const idx = std::distance(r_mat[k].begin(), std::find(r_mat[k].begin(), r_mat[k].end(), true));
+                    for (auto l : std::views::iota(k + 1, r_mat.size())) {
+                        if (r_mat[l][idx]) {
+                            r_mat[l] += r_mat[k];
+                            aug_r[l] += aug_r[k];
+                        }
+                    }
+                    continue;
+                }
+                if ((aug_r[k][i] ^ aug_r[k][j]) == 0) {
+                    continue;
+                }
+                auto const& y = aug_r[k];
 
-            if (y.is_zeros()) {
-                continue;
-            }
-
-            auto const updated_matrix     = apply_rank1_update(matrix, z, y);
-            auto const updated_polynomial = from_boolean_matrix(dvlab::transpose(updated_matrix));
-            int const score               = static_cast<int>(original_count) - static_cast<int>(updated_polynomial.size());
-
-            if (score > 0) {
-                best_result = std::make_tuple(z, y, updated_matrix);
-                return best_result;
+                // Eq. 85 objective: number of duplicate/zero columns removed by P ⊕ z yᵀ.
+                int score = 0;
+                for (auto l : std::views::iota(0ul, n_terms)) {
+                    if (!y[l]) continue;
+                    table[l] += z;
+                    auto const it = term_index.find(table[l]);
+                    if (it != term_index.end() && !y[it->second]) {
+                        score += 2;
+                    }
+                    table[l] += z;  // restore
+                }
+                if (y.sum() % 2 == 1) {
+                    score += term_index.contains(z) ? 1 : -1;
+                }
+                if (score > max_score) {
+                    max_score = score;
+                    best_z    = z;
+                    best_y    = y;
+                    have_best = true;
+                }
             }
         }
     }
 
-    return best_result;
+    if (!have_best || max_score == 0) {
+        return std::nullopt;
+    }
+
+    // Apply the argmax move: P' = P ⊕ z yᵀ (append column z when |y| is odd, Eq. 84).
+    for (auto l : std::views::iota(0ul, n_terms)) {
+        if (best_y[l]) {
+            table[l] += best_z;
+        }
+    }
+    if (best_y.sum() % 2 == 1) {
+        table.push_row(best_z);
+    }
+    return from_boolean_matrix(table);
 }
 
 Polynomial fasttodd_once(Polynomial const& polynomial) {
@@ -766,19 +652,13 @@ Polynomial fasttodd_once(Polynomial const& polynomial) {
 
     spdlog::debug("TOHPE polynomial count: {}", new_polynomial.size());
 
-    auto const phase_poly_matrix = load_phase_poly_matrix(new_polynomial);
-    auto result                  = fast_todd_iteration(phase_poly_matrix);
-
+    auto result = fast_todd_move(new_polynomial);
     if (!result.has_value()) {
         return new_polynomial;
     }
 
-    auto const& [z, y, updated_matrix] = result.value();
     spdlog::debug("Found a Fast-TODD move");
-    spdlog::debug("- z: {}", fmt::join(z, ""));
-    spdlog::debug("- y: {}", fmt::join(y, ""));
-
-    return from_boolean_matrix(dvlab::transpose(updated_matrix));
+    return *result;
 }
 }  // namespace
 
@@ -804,28 +684,9 @@ std::pair<StabilizerTableau, Polynomial> TohpePhasePolynomialOptimizationStrateg
     spdlog::debug("num_terms before TOHPE: {}", ret_polynomial.size());
     spdlog::trace("Polynomial before TOHPE:\n{}", fmt::join(ret_polynomial, "\n"));
 
-    size_t move_idx = 0;
     while (true) {
-        auto const num_terms     = ret_polynomial.size();
-        auto const input_summary = summarize_term_bitstrings(polynomial_term_bitstrings(ret_polynomial));
-        std::optional<Polynomial> iteration_polynomial;
-        if (tohpe_trace_compare_enabled()) {
-            iteration_polynomial = tohpe_once_iteration(ret_polynomial, 1);
-        }
-        auto const slow_polynomial = tohpe_use_iteration() ? tohpe_once_iteration(ret_polynomial) : tohpe_once(ret_polynomial);
-        if (tohpe_trace_compare_enabled()) {
-            auto const slow_summary = summarize_term_bitstrings(polynomial_term_bitstrings(slow_polynomial));
-            auto const fast_summary = summarize_term_bitstrings(polynomial_term_bitstrings(*iteration_polynomial));
-            auto const same_output  = slow_summary == fast_summary;
-            tohpe_trace("compare", same_output ? "agree" : "diverge",
-                        fmt::format("move={} input={} slow={} fast={}", move_idx, input_summary, slow_summary, fast_summary));
-            if (!same_output && tohpe_trace_stop_on_divergence()) {
-                ret_polynomial = slow_polynomial;
-                break;
-            }
-        }
-        ret_polynomial = slow_polynomial;
-        ++move_idx;
+        auto const num_terms = ret_polynomial.size();
+        ret_polynomial       = tohpe_use_iteration() ? tohpe_once_iteration(ret_polynomial) : tohpe_once(ret_polynomial);
         if (ret_polynomial.empty() || ret_polynomial.size() == num_terms) {
             break;
         }
@@ -882,6 +743,13 @@ std::pair<StabilizerTableau, Polynomial> FastToddPhasePolynomialOptimizationStra
         }
         spdlog::trace("Polynomial after FastTODD:\n{}", fmt::join(ret_polynomial, "\n"));
         spdlog::debug("num_terms after FastTODD: {}", ret_polynomial.size());
+    }
+
+    auto optimized_multi_linear_polynomial = MultiLinearPolynomial();
+    optimized_multi_linear_polynomial.add_rotations(ret_polynomial, false);
+    if (!multi_linear_polynomial.has_same_signature_tensor(optimized_multi_linear_polynomial)) {
+        spdlog::error("Failed to perform FastTODD optimization: the post-optimization polynomial does not have the same signature tensor as the pre-optimization polynomial!!");
+        return {clifford, polynomial};
     }
 
     multi_linear_polynomial.add_rotations(ret_polynomial, true);
