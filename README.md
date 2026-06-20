@@ -158,6 +158,42 @@ Then run `make -j8` as usual; the build will use these values.
 </details>
 
 <details>
+<summary>Build options: SIMD / arch tuning (QSYN_SIMD)</summary>
+
+By default `qsyn` is built for the baseline ISA (`x86-64` / `armv8-a`) so the
+binary runs anywhere. You can opt in to architecture-targeted compiler flags so
+the compiler auto-vectorizes the hot loops (primarily the GF(2) row-XOR in the
+FastTODD/TOHPE/TODD phase-polynomial optimization path) by setting `QSYN_SIMD`:
+
+```sh
+make release QSYN_SIMD=native   # tune for this exact build host
+make test    QSYN_SIMD=modern   # AVX2/FMA-class HW
+```
+
+| Level             | Intent                   | x86-64                        | arm64 (aarch64)    | Portable?             |
+|-------------------|--------------------------|-------------------------------|--------------------|-----------------------|
+| `off` *(default)* | unchanged, baseline ISA  | *(none)*                      | *(none)*           | yes — runs anywhere   |
+| `generic`         | portable but vectorizing | `-march=x86-64-v2`            | `-march=armv8-a`   | yes — any modern CPU  |
+| `modern`          | assume AVX2/FMA-class HW | `-march=x86-64-v3`            | `-march=armv8.2-a` | most CPUs since ~2015 |
+| `native`          | this exact build host    | `-march=native -mtune=native` | `-mcpu=native`     | **no** — host only    |
+
+Notes:
+
+- **Default `off`** keeps today's behavior; CI, Docker, and any distributed
+  binaries are unaffected unless they ask for a level.
+- **Portability warning:** a `native`/`modern` binary may crash with `SIGILL` on
+  an older or different CPU than the one it was built on. For Docker/release
+  images, keep `off` (or `generic` for a vectorizing-but-portable floor) — never
+  `native`, since the build host is not the run host.
+- `modern` is "one generation past baseline" on each architecture (AVX2/FMA via
+  `x86-64-v3` on x86, `armv8.2-a` on arm64). These are analogous targets, not
+  identical feature sets.
+- Any flag the compiler doesn't accept is validated at configure time and skipped
+  with a warning, so an unsupported level never breaks the build.
+
+</details>
+
+<details>
 <summary>Docker Builds</summary>
 
 You can run `qsyn` without building (Docker image has a pre-built binary):
