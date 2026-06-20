@@ -24,6 +24,10 @@ endif
 
 ECHO := $(shell which echo) -e
 
+# Opt-in SIMD/arch tuning level forwarded to CMake (off | generic | modern | native).
+# Default off = today's behavior. Example: make release QSYN_SIMD=native
+QSYN_SIMD ?= off
+
 RELEASE_DIR := build
 DEBUG_DIR := debug
 
@@ -38,7 +42,8 @@ configure:
 	-DCMAKE_EXPORT_COMPILE_COMMANDS=1 \
 	-DCMAKE_BUILD_TYPE=Release \
 	-DCMAKE_C_COMPILER=$(CC) \
-	-DCMAKE_CXX_COMPILER=$(CXX)
+	-DCMAKE_CXX_COMPILER=$(CXX) \
+	-DQSYN_SIMD=$(QSYN_SIMD)
 .PHONY: configure
 
 configure-debug:
@@ -48,7 +53,8 @@ configure-debug:
 	-DCMAKE_EXPORT_COMPILE_COMMANDS=1 \
 	-DCMAKE_BUILD_TYPE=Debug \
 	-DCMAKE_C_COMPILER=$(CC) \
-	-DCMAKE_CXX_COMPILER=$(CXX)
+	-DCMAKE_CXX_COMPILER=$(CXX) \
+	-DQSYN_SIMD=$(QSYN_SIMD)
 .PHONY: configure-debug
 
 release: configure

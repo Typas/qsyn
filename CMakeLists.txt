@@ -72,6 +72,76 @@ project(
     LANGUAGES CXX
     VERSION 0.8.1)
 
+# ----------------------------------------------------------------------------
+# Opt-in SIMD / arch tuning (default: off)
+#
+# Lets users build with architecture-targeted compiler flags so the compiler
+# auto-vectorizes the hot loops (primarily the GF(2) row-XOR in the
+# FastTODD/TOHPE/TODD path). No source changes; build flags only.
+# `off` is today's behavior, so CI/Docker/distributed binaries are unaffected
+# unless they opt in. Must come after project() since it reads
+# CMAKE_SYSTEM_PROCESSOR and uses the detected compiler.
+# ----------------------------------------------------------------------------
+set(QSYN_SIMD "off" CACHE STRING
+    "SIMD/arch tuning level: off | generic | modern | native")
+set_property(CACHE QSYN_SIMD PROPERTY STRINGS off generic modern native)
+
+# Map (QSYN_SIMD, arch) -> candidate flags, validate each, collect supported.
+function(qsyn_resolve_simd_flags out_var)
+  set(_flags "")
+  if(QSYN_SIMD STREQUAL "off")
+    set(${out_var} "" PARENT_SCOPE)
+    return()
+  endif()
+
+  # arch family
+  string(TOLOWER "${CMAKE_SYSTEM_PROCESSOR}" _arch)
+  if(_arch MATCHES "x86_64|amd64")
+    set(_is_x86 TRUE)
+  elseif(_arch MATCHES "aarch64|arm64")
+    set(_is_arm TRUE)
+  else()
+    message(WARNING "QSYN_SIMD=${QSYN_SIMD}: unrecognized arch '${_arch}', ignoring.")
+    set(${out_var} "" PARENT_SCOPE)
+    return()
+  endif()
+
+  set(_candidates "")
+  if(_is_x86)
+    if(QSYN_SIMD STREQUAL "generic")
+      list(APPEND _candidates "-march=x86-64-v2")
+    elseif(QSYN_SIMD STREQUAL "modern")
+      list(APPEND _candidates "-march=x86-64-v3")
+    elseif(QSYN_SIMD STREQUAL "native")
+      list(APPEND _candidates "-march=native" "-mtune=native")
+    endif()
+  elseif(_is_arm)
+    if(QSYN_SIMD STREQUAL "generic")
+      list(APPEND _candidates "-march=armv8-a")
+    elseif(QSYN_SIMD STREQUAL "modern")
+      list(APPEND _candidates "-march=armv8.2-a")
+    elseif(QSYN_SIMD STREQUAL "native")
+      list(APPEND _candidates "-mcpu=native")
+    endif()
+  endif()
+
+  # validate each flag; drop unsupported ones with a warning
+  foreach(_f IN LISTS _candidates)
+    string(MAKE_C_IDENTIFIER "QSYN_SIMD_SUPPORTS_${_f}" _cache_key)
+    check_cxx_compiler_flag("${_f}" ${_cache_key})
+    if(${_cache_key})
+      list(APPEND _flags "${_f}")
+    else()
+      message(WARNING "QSYN_SIMD: compiler rejects '${_f}', skipping it.")
+    endif()
+  endforeach()
+
+  set(${out_var} "${_flags}" PARENT_SCOPE)
+endfunction()
+
+qsyn_resolve_simd_flags(QSYN_SIMD_FLAGS)
+message(STATUS "QSYN_SIMD=${QSYN_SIMD} -> flags: ${QSYN_SIMD_FLAGS}")
+
 # Link the correct unwind library for Clang18 on Apple Silicon
 # Assumes that Homebrew is used to install LLVM
 # https://github.com/llvm/llvm-project/issues/92121#issuecomment-2307947170
@@ -305,6 +375,12 @@ if(COMPILER_SUPPORTS_WNOERROR_CAST_USER_DEFINED)
                            PRIVATE -Wno-error=cast-user-defined)
 endif()
 
+# Opt-in SIMD/arch tuning (QSYN_SIMD). Most important target: boolean_matrix.cpp
+# and the tableau optimization sources compile here.
+if(QSYN_SIMD_FLAGS)
+    target_compile_options(${QSYN_LIB_NAME} PRIVATE ${QSYN_SIMD_FLAGS})
+endif()
+
 # ----------------------------------------------------------------------------
 # config for qsyn target
 # builds qsyn executable
@@ -349,6 +425,11 @@ check_cxx_compiler_flag(
 if(COMPILER_SUPPORTS_WNOERROR_CAST_USER_DEFINED)
     target_compile_options(${CMAKE_PROJECT_NAME}
                            PRIVATE -Wno-error=cast-user-defined)
+endif()
+
+# Opt-in SIMD/arch tuning (QSYN_SIMD).
+if(QSYN_SIMD_FLAGS)
+    target_compile_options(${CMAKE_PROJECT_NAME} PRIVATE ${QSYN_SIMD_FLAGS})
 endif()
 
 target_include_directories(
@@ -448,4 +529,9 @@ endif()
 if(COMPILER_SUPPORTS_WNOERROR_CAST_USER_DEFINED)
     target_compile_options(${UNIT_TEST_NAME}
                            PRIVATE -Wno-error=cast-user-defined)
+endif()
+
+# Opt-in SIMD/arch tuning (QSYN_SIMD): tests exercise the same codegen.
+if(QSYN_SIMD_FLAGS)
+    target_compile_options(${UNIT_TEST_NAME} PRIVATE ${QSYN_SIMD_FLAGS})
 endif()
