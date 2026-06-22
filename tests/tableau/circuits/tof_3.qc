@@ -1,44 +1,16 @@
-.v q0 q1 q2 q3 q4
+.v 1 2 3 4 5
+.i 1 2 3 4
 
 BEGIN
-S q0
-S q1
-T q2
-Z q1 q4
-H q4
-tdg q4
-Tof q0 q4
-T q4
-Tof q1 q4
-tdg q4
-Tof q0 q4
-T q4
-Tof q3 q4
-H q4
-T q4
-H q3
-tdg q3
-Tof q2 q3
-T q3
-Tof q4 q3
-Tof q2 q4
-tdg q4
-Tof q2 q4
-Z q1 q4
-H q4
-tdg q4
-Tof q0 q4
-T q4
-Tof q1 q4
-tdg q4
-Tof q0 q4
-T q4
-H q4
-Tof q0 q1
-sdg q1
-Tof q0 q1
-tdg q3
-Tof q2 q3
-T q3
-H q3
+
+H 5
+Z 1 2 5
+H 5
+H 4
+Z 3 5 4
+H 4
+H 5
+Z 1 2 5
+H 5
+
 END

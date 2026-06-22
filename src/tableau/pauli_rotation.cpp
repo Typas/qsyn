@@ -130,6 +130,21 @@ PauliProduct::PauliProduct(std::string_view pauli_str) {
     }
 }
 
+PauliProduct PauliProduct::extended_with_ancillae(size_t k) const {
+    auto const n  = n_qubits();
+    auto const nn = n + k;
+    // z at [0,n), x at [n+k, 2n+k), sign r at 2(n+k); ancilla slots stay 0 (identity).
+    sul::dynamic_bitset<> bs(2 * nn + 1, 0);
+    for (size_t i = 0; i < n; ++i) {
+        if (is_z_set(i)) bs.set(i);
+        if (is_x_set(i)) bs.set(nn + i);
+    }
+    if (is_neg()) bs.set(2 * nn);
+    PauliProduct result(*this);
+    result._bitset = std::move(bs);
+    return result;
+}
+
 PauliProduct& PauliProduct::operator*=(PauliProduct const& rhs) {
     assert(n_qubits() == rhs.n_qubits());
     // calculate the sign

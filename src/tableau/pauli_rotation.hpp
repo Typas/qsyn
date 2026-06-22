@@ -249,6 +249,12 @@ public:
         return std::ranges::all_of(std::views::iota(0ul, n_qubits()), [this](size_t i) { return is_i(i); });
     }
 
+    // Return a copy widened by `k` ancilla qubits appended at the high end.
+    // The original z/x/sign bits keep their semantic positions; the new
+    // ancilla qubits [n, n+k) are identity. Existing constructors/indexing
+    // stay untouched so the un-extended product remains the A/B baseline.
+    PauliProduct extended_with_ancillae(size_t k) const;
+
 private:
     sul::dynamic_bitset<> _bitset;
 
@@ -307,6 +313,12 @@ public:
     }
 
     bool is_diagonal() const { return _pauli_product.is_diagonal(); }
+
+    // Widen by `k` ancilla qubits (identity on the new qubits), preserving the
+    // rotation phase. Sibling of the un-extended rotation; nothing else changes.
+    PauliRotation extended_with_ancillae(size_t k) const {
+        return PauliRotation(_pauli_product.extended_with_ancillae(k), _phase);
+    }
 
 private:
     PauliProduct _pauli_product;

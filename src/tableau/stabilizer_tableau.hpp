@@ -95,6 +95,22 @@ public:
 
     bool is_identity() const { return *this == StabilizerTableau{n_qubits()}; }
 
+    // Return a copy widened by `k` ancilla qubits. Because the stabilizer /
+    // destabilizer split is index-based (destabilizer_idx(i) = i + n_qubits()),
+    // adding qubits shifts that split: a naive row push_back would be wrong.
+    // Instead rebuild over n+k qubits via the accessors so original qubit i
+    // keeps its stabilizer/destabilizer rows (widened by identity) and the k
+    // fresh ancilla qubits init to Z/X identity on the new qubits.
+    StabilizerTableau extended_with_ancillae(size_t k) const {
+        auto const n = n_qubits();
+        StabilizerTableau result(n + k);
+        for (size_t i = 0; i < n; ++i) {
+            result.stabilizer(i)   = stabilizer(i).extended_with_ancillae(k);
+            result.destabilizer(i) = destabilizer(i).extended_with_ancillae(k);
+        }
+        return result;
+    }
+
     bool is_commutative(PauliProduct const& rhs) const {
         return std::ranges::all_of(
             _stabilizers | std::views::take(n_qubits()),
