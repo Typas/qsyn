@@ -14,6 +14,7 @@
 #include "argparse/argument.hpp"
 #include "cli/cli.hpp"
 #include "cmd/tableau_mgr.hpp"
+#include "tableau/optimize/adaptive_gadget.hpp"
 #include "tableau/pauli_rotation.hpp"
 #include "tableau/stabilizer_tableau.hpp"
 #include "tableau/tableau_optimization.hpp"
@@ -198,6 +199,9 @@ dvlab::Command tableau_optimization_cmd(TableauMgr& tableau_mgr) {
             methods.add_parser("hopt")
                 .description("Minimize the number of Hadamard gates and internal Hadamard gates in the tableau");
 
+            methods.add_parser("gadgetize")
+                .description("Gadgetize every internal Hadamard into a fresh ancilla, merging the Hadamard-bounded phase-polynomial regions. Run before phasepoly so the optimizer sees one large polynomial. Keeps ancillae (initialized |0>)");
+
             auto phasepoly_parser = methods.add_parser("phasepoly")
                                         .description("Reduce the number of terms for phase polynomials in the Tableau");
 
@@ -230,6 +234,7 @@ dvlab::Command tableau_optimization_cmd(TableauMgr& tableau_mgr) {
                 collapse,
                 t_merge,
                 internal_h_opt,
+                gadgetize,
                 phase_polynomial_optimization,
                 matroid_partition
             };
@@ -243,6 +248,8 @@ dvlab::Command tableau_optimization_cmd(TableauMgr& tableau_mgr) {
                     return OptimizationMethod::t_merge;
                 } else if (dvlab::str::is_prefix_of(method_str, "hopt")) {
                     return OptimizationMethod::internal_h_opt;
+                } else if (dvlab::str::is_prefix_of(method_str, "gadgetize")) {
+                    return OptimizationMethod::gadgetize;
                 } else if (dvlab::str::is_prefix_of(method_str, "phasepoly")) {
                     return OptimizationMethod::phase_polynomial_optimization;
                 } else if (dvlab::str::is_prefix_of(method_str, "matpar")) {
@@ -307,6 +314,12 @@ dvlab::Command tableau_optimization_cmd(TableauMgr& tableau_mgr) {
                 case OptimizationMethod::internal_h_opt:
                     minimize_internal_hadamards(*tableau_mgr.get());
                     tableau_mgr.add_procedure("InternalHOpt");
+                    break;
+                case OptimizationMethod::gadgetize:
+                    if (!gadgetize_internal_hadamards(*tableau_mgr.get())) {
+                        return dvlab::CmdExecResult::error;
+                    }
+                    tableau_mgr.add_procedure("Gadgetize");
                     break;
                 case OptimizationMethod::phase_polynomial_optimization:
                     do_phase_polynomial_optimization();

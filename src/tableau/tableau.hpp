@@ -81,6 +81,25 @@ public:
         return _subtableaux.empty();
     }
 
+    // Return a copy widened by `k` ancilla qubits: every SubTableau (Clifford
+    // blocks and phase-poly regions alike) is widened via its own
+    // extended_with_ancillae, and _n_qubits grows by k. Additive sibling of the
+    // existing constructors; the un-extended tableau stays the A/B baseline.
+    Tableau extended_with_ancillae(size_t k) const {
+        Tableau result(*this);
+        for (auto& subtableau : result._subtableaux) {
+            std::visit(
+                dvlab::overloaded(
+                    [k](StabilizerTableau& st) { st = st.extended_with_ancillae(k); },
+                    [k](std::vector<PauliRotation>& prs) {
+                        for (auto& pr : prs) pr = pr.extended_with_ancillae(k);
+                    }),
+                subtableau);
+        }
+        result._n_qubits += k;
+        return result;
+    }
+
     auto insert(std::vector<SubTableau>::iterator pos, std::vector<SubTableau>::iterator first, std::vector<SubTableau>::iterator last) {
         // FIXME - check if the subtableaux have the same number of qubits
         return _subtableaux.insert(pos, first, last);
