@@ -8,10 +8,18 @@
 
 #include <spdlog/spdlog.h>
 
+#include <unistd.h>
+
+#include <algorithm>
 #include <array>
 #include <cstddef>
+#include <cstdio>
+#include <cstdlib>
+#include <limits>
+#include <numeric>
 #include <optional>
 #include <queue>
+#include <span>
 #include <unordered_set>
 #include <utility>
 #include <vector>
@@ -145,6 +153,42 @@ size_t count_hadamards(StabilizerTableau const& st) {
     return count;
 }
 
+// One gadgetized merge-group. `clifford` is the residual front Clifford from the bounded merge
+// (c_int); `region` is the merged diagonal phase polynomial.
+struct GadgetizedSpan {
+    StabilizerTableau clifford;
+    std::vector<PauliRotation> region;
+};
+
+// Gadgetize the internal Clifford blocks strictly between region subtableau indices `lo` and `hi`
+// of the already-extended tableau `ext`, splicing each Hadamard onto a fresh ancilla drawn from
+// `anc_next` (advanced as ancillae are consumed), then collapse [lo..hi] into one diagonal region.
+// Factored out so the gadgetize-everything path and the selective path share identical merge logic.
+GadgetizedSpan gadgetize_span(Tableau& ext, size_t lo, size_t hi, size_t& anc_next) {
+    auto const n_total = ext.n_qubits();
+    for (size_t i = lo + 1; i < hi; ++i) {
+        auto* st = std::get_if<StabilizerTableau>(&ext[i]);
+        if (st == nullptr) continue;
+        CliffordOperatorString spliced;
+        for (auto const& op : extract_clifford_operators(*st)) {
+            if (op.first == CliffordOperatorType::h) {
+                append_gadget_body(spliced, op.second[0], anc_next++);
+            } else {
+                spliced.push_back(op);
+            }
+        }
+        *st = StabilizerTableau{n_total}.apply(spliced);
+    }
+    Tableau interior{n_total};
+    // Move (not copy) this group's subtableaux out of `ext` -- they are not read again elsewhere
+    // (front/back/separators only touch ext indices outside [lo..hi]), so `ext` shrinks as groups are
+    // absorbed instead of staying fully resident beside `interior`. Halves the gadgetize peak.
+    for (size_t i = lo; i <= hi; ++i) interior.push_back(std::move(ext[i]));
+    collapse(interior);  // -> [C_int, P_merged]
+    return GadgetizedSpan{std::get<StabilizerTableau>(interior.front()),
+                          std::get<std::vector<PauliRotation>>(interior.back())};
+}
+
 }  // namespace
 
 bool gadgetize_internal_hadamards(Tableau& tableau) {
@@ -153,7 +197,7 @@ bool gadgetize_internal_hadamards(Tableau& tableau) {
 
     // Structural internal Hadamards live in Clifford blocks strictly between the
     // first and last phase-polynomial region. Tableau-native: no circuit
-    // round-trip (which is lossy for FastTODD), rotations stay symbolic.
+    // round-trip (which is lossy for the optimizer), rotations stay symbolic.
     std::optional<size_t> first_rot;
     std::optional<size_t> last_rot;
     for (size_t i = 0; i < tableau.size(); ++i) {
@@ -172,36 +216,10 @@ bool gadgetize_internal_hadamards(Tableau& tableau) {
     }
     if (k == 0) return true;  // no internal Hadamards
 
-    // Widen everything to n + k idle ancillae, then gadgetize each internal block:
-    // rebuild it from its gate string with every Hadamard replaced by the gadget
-    // body onto a fresh ancilla.
-    Tableau ext        = tableau.extended_with_ancillae(k);
+    // Widen to n + k idle ancillae and gadgetize+merge the whole interior into one region.
+    Tableau ext = tableau.extended_with_ancillae(k);
     size_t next_ancilla = n;
-    for (size_t i = *first_rot + 1; i < *last_rot; ++i) {
-        auto* st = std::get_if<StabilizerTableau>(&ext[i]);
-        if (!st) continue;
-        CliffordOperatorString spliced;
-        for (auto const& op : extract_clifford_operators(*st)) {
-            if (op.first == CliffordOperatorType::h) {
-                append_gadget_body(spliced, op.second[0], next_ancilla++);
-            } else {
-                spliced.push_back(op);
-            }
-        }
-        *st = StabilizerTableau{n + k}.apply(spliced);
-    }
-
-    // Bounded interior-merge: merge ONLY the phase-poly regions and the (now
-    // Hadamard-free) gadget bodies between the first and last region into one
-    // diagonal region, keeping the leading and trailing Clifford blocks as
-    // boundaries. Running collapse on the whole tableau would instead thread the
-    // trailing block's Hadamards leftward into the region (H Z = X H), making it
-    // non-diagonal so FastTODD skips it.
-    Tableau interior{n + k};  // seeded with an identity Clifford front
-    for (size_t i = *first_rot; i <= *last_rot; ++i) interior.push_back(ext[i]);
-    collapse(interior);  // -> [C_int, P_merged]
-    auto const& c_int    = std::get<StabilizerTableau>(interior.front());
-    auto& p_merged       = std::get<std::vector<PauliRotation>>(interior.back());
+    auto const span     = gadgetize_span(ext, *first_rot, *last_rot, next_ancilla);
 
     // Front boundary: leading Clifford blocks, then the interior residual Clifford,
     // with the ancilla Hadamard prep prepended (each ancilla starts |+>).
@@ -209,7 +227,7 @@ bool gadgetize_internal_hadamards(Tableau& tableau) {
     for (size_t i = 0; i < *first_rot; ++i) {
         front.apply(extract_clifford_operators(std::get<StabilizerTableau>(ext[i])));
     }
-    front.apply(extract_clifford_operators(c_int));
+    front.apply(extract_clifford_operators(span.clifford));
     for (size_t a = n; a < n + k; ++a) front.prepend_h(a);
 
     // Back boundary: trailing Clifford blocks, then the ancilla Hadamard uncompute.
@@ -219,8 +237,306 @@ bool gadgetize_internal_hadamards(Tableau& tableau) {
     }
     for (size_t a = n; a < n + k; ++a) back.h(a);
 
-    tableau = Tableau{front, p_merged, back};
+    tableau = Tableau{front, span.region, back};
     return true;
+}
+
+bool gadgetize_internal_hadamards(Tableau& tableau, std::span<size_t const> selected_boundaries) {
+    if (tableau.is_empty() || selected_boundaries.empty()) return false;
+    auto const n = tableau.n_qubits();
+
+    // Region subtableau indices, in pipeline order. Boundary b sits between regions[b], regions[b+1].
+    std::vector<size_t> regions;
+    for (size_t i = 0; i < tableau.size(); ++i) {
+        if (std::holds_alternative<std::vector<PauliRotation>>(tableau[i])) regions.push_back(i);
+    }
+    if (regions.size() < 2) return false;  // no boundary to merge across
+
+    std::unordered_set<size_t> selected;
+    for (auto const b : selected_boundaries) {
+        if (b + 1 < regions.size()) selected.insert(b);  // ignore out-of-range
+    }
+    if (selected.empty()) return false;
+
+    // Ancilla count = #internal Hadamards in the Clifford blocks of the selected boundaries.
+    size_t k = 0;
+    for (auto const b : selected) {
+        for (size_t i = regions[b] + 1; i < regions[b + 1]; ++i) {
+            if (auto const* st = std::get_if<StabilizerTableau>(&tableau[i])) k += count_hadamards(*st);
+        }
+    }
+    if (k == 0) return false;  // selected boundaries carry no internal Hadamards
+
+    Tableau ext         = tableau.extended_with_ancillae(k);
+    size_t next_ancilla = n;
+
+    // Merge-groups: maximal runs of regions joined by selected boundaries. Group spans
+    // region-indices [a..b]; unselected boundaries separate groups.
+    std::vector<std::pair<size_t, size_t>> groups;
+    for (size_t a = 0; a < regions.size();) {
+        size_t b = a;
+        while (b + 1 < regions.size() && selected.contains(b)) ++b;
+        groups.emplace_back(a, b);
+        a = b + 1;
+    }
+
+    // Front boundary: leading Clifford blocks before the first region, then the first group's
+    // residual Clifford, with all ancilla Hadamard preps prepended (each ancilla starts |+>).
+    StabilizerTableau front{n + k};
+    for (size_t i = 0; i < regions.front(); ++i) {
+        front.apply(extract_clifford_operators(std::get<StabilizerTableau>(ext[i])));
+    }
+
+    std::vector<SubTableau> middle;  // separators + merged regions, between front and back
+    for (size_t g = 0; g < groups.size(); ++g) {
+        auto const [a, b] = groups[g];
+        auto span         = gadgetize_span(ext, regions[a], regions[b], next_ancilla);
+        if (g == 0) {
+            front.apply(extract_clifford_operators(span.clifford));
+        } else {
+            // Separator = unselected boundary Clifford(s) between the previous group's last region
+            // and this group's first region, then this group's residual Clifford.
+            StabilizerTableau sep{n + k};
+            for (size_t i = regions[groups[g - 1].second] + 1; i < regions[a]; ++i) {
+                if (auto const* st = std::get_if<StabilizerTableau>(&ext[i])) {
+                    sep.apply(extract_clifford_operators(*st));
+                }
+            }
+            sep.apply(extract_clifford_operators(span.clifford));
+            middle.emplace_back(std::move(sep));
+        }
+        middle.emplace_back(std::move(span.region));
+    }
+    for (size_t a = n; a < n + k; ++a) front.prepend_h(a);
+
+    // Back boundary: trailing Clifford blocks after the last region, then ancilla uncompute.
+    StabilizerTableau back{n + k};
+    for (size_t i = regions.back() + 1; i < ext.size(); ++i) {
+        back.apply(extract_clifford_operators(std::get<StabilizerTableau>(ext[i])));
+    }
+    for (size_t a = n; a < n + k; ++a) back.h(a);
+
+    // Assemble: [front] [separator, region]... [back]. Move (not copy) each `middle` element into
+    // `out`: the result is identical, but it avoids holding a second full-size copy of the widened
+    // subtableaux at peak (profiled: copying here was a ~350 MB / third resident copy on hwb10).
+    Tableau out{n + k};
+    out.erase(out.begin(), out.end());
+    out.push_back(SubTableau{std::move(front)});
+    for (auto& st : middle) out.push_back(std::move(st));
+    out.push_back(SubTableau{std::move(back)});
+    tableau = std::move(out);
+    return true;
+}
+
+// Live resident-set size of this process, read from /proc/self/statm (Linux). The planner uses this as
+// the baseline floor instead of a constant: the resident input (QCir DAG + un-widened tableau) varies
+// from ~13 MiB (tof3) to ~140 MiB (hwb11), so a fixed floor catastrophically under-counts big inputs.
+// This is a MEASUREMENT, not a fitted number. Returns 0 off Linux (then the floor is just 0 -> the
+// structural terms still bound the growth; macOS is predict-only without an OS backstop anyway).
+size_t current_rss_bytes() {
+    std::FILE* f = std::fopen("/proc/self/statm", "r");
+    if (f == nullptr) return 0;
+    unsigned long sz = 0;
+    unsigned long rss = 0;
+    auto const matched = std::fscanf(f, "%lu %lu", &sz, &rss);
+    std::fclose(f);
+    return matched == 2 ? static_cast<size_t>(rss) * static_cast<size_t>(sysconf(_SC_PAGESIZE)) : 0;
+}
+
+// Structural peak-RSS GROWTH (bytes) over the plan-time baseline, for the whole gadgetize -> phasepoly
+// pipeline of a plan that widens the tableau to `n` qubits, where the widened tableau holds `s_clifford`
+// StabilizerTableau blocks + `m_total` resident PauliRotations, and the largest single region to be
+// phasepoly-optimized has `m_region` terms. The planner adds current_rss_bytes() as the baseline.
+//
+// EVERY constant below is a sizeof or a paper dimension (no fitted "engineering coefficient"):
+//   - StabilizerTableau = 2n PauliProducts, each a sul::dynamic_bitset of (2n+1) bits  -> 2n*(2n+1)/8 B
+//     (PauliProduct::_bitset is bit-packed, 1 bit/bit; stabilizer_tableau.hpp / pauli_rotation.hpp).
+//   - PauliRotation     = one (2n+1)-bit bitset                                         -> (2n+1)/8 B.
+//   - CliffordOperator  = pair<u8, array<size_t,2>>                                     -> 24 B.
+//   - FastTODD L-matrix = BooleanMatrix (Row = std::vector<unsigned char>, 1 byte/bit), rows = terms,
+//     cols = n + C(n,2)  (fastTodd.cpp build_l_transpose_row_from_term reserves n + n(n-1)/2); the
+//     l_matrix + l_matrix_transpose pair (x2) + augmented=identity(m) (m^2) -- Heyfron2018/Vandaele2024.
+//
+// sizeof a PauliProduct (== its sole member sul::dynamic_bitset, measured 32 B) and a PauliRotation
+// (PauliProduct + dvlab::Phase, ~48 B). These struct headers dominate the bit payload at small n and
+// were the source of an earlier small-circuit under-prediction, so they are kept as explicit terms.
+constexpr size_t kPauliProductBytes  = 32;
+constexpr size_t kPauliRotationBytes = 48;
+
+// FIXME: not well optimized for large circuits. This fixed ~4.5x envelope over-predicts more as n grows,
+// so utilization (actual/budget) falls at large budgets (hwb10: ~89% at 512M, ~51% at 48G) and big
+// budgets gadgetize fewer Hadamards than would fit. Safe (only over-predicts, never OOMs), but a tight
+// fix needs an n-dependent multiplier (more data required). Collapse runtime also grows ~ s_clifford*n^2.
+//
+// STRUCTURAL: the selective gadgetize transform keeps every Clifford block as a full-width
+// StabilizerTableau, and at peak holds ~3 coexisting full-width copies of that set -- `ext`
+// (extended_with_ancillae, being consumed group-by-group), `middle` (the accumulated output
+// separators+regions), and `out` (assembled from middle). Profiled on hwb10 (RSS probe, 2026-06-23).
+constexpr size_t kWidenCopies = 3;
+// The one allocator-dependent knob: real RSS = structural bytes x allocator overhead, which no sizeof
+// captures and which varies by allocator. User-overridable via env QSYN_GADGET_HEADROOM (a percent);
+// default 150 measured on glibc. Re-validate per allocator (jemalloc/tcmalloc/mimalloc/musl) -- an
+// under-value OOMs under predict-only enforcement.
+// FIXME: 150 is the glibc (best-case) value -- a cross-allocator sweep showed mimalloc3 needs ~+18% and
+// the spread grows with scale; the cross-allocator / large-budget default policy is untested, unresolved.
+size_t gadget_alloc_headroom_percent() {
+    static size_t const pct = []() -> size_t {
+        if (char const* e = std::getenv("QSYN_GADGET_HEADROOM")) {
+            if (auto const v = std::strtoul(e, nullptr, 10); v > 0) return static_cast<size_t>(v);
+        }
+        return 150;
+    }();
+    return pct;
+}
+
+size_t predict_peak_bytes(size_t n, size_t s_clifford, size_t m_total, size_t m_region) {
+    // One widened StabilizerTableau: 2n PauliProducts, each (2n+1) bits packed PLUS the 32 B struct.
+    auto const stab_bytes = (2 * n) * (2 * n + 1) / 8 + (2 * n) * kPauliProductBytes;
+    // One widened PauliRotation: (2n+1) bits packed PLUS the struct.
+    auto const rot_bytes = (2 * n + 1) / 8 + kPauliRotationBytes;
+
+    // GADGETIZE stage: kWidenCopies resident copies of the width-n tableau (s_clifford StabilizerTableaux
+    // + m_total rotations) + synthesize() temporaries (CliffordOperatorString O((2n)^2) x 24 B), all
+    // inflated by allocator fragmentation.
+    auto const live_gadgetize = kWidenCopies * (s_clifford * stab_bytes + m_total * rot_bytes)
+                              + 24 * (2 * n) * (2 * n);
+    auto const gadgetize = live_gadgetize / 100 * gadget_alloc_headroom_percent();
+
+    // PHASEPOLY stage (FastTODD, BooleanMatrix::Row = 1 byte/bit): every region runs at the global width
+    // n after gadgetize, so the peak is the largest region's L-matrices + augmented + phase-poly matrix.
+    auto const c_n_2     = n * (n - 1) / 2;
+    auto const phasepoly = 2 * m_region * (n + c_n_2) + m_region * m_region + n * m_region;
+
+    // Structural growth only; the planner adds the live plan-time RSS as the baseline floor.
+    return std::max(gadgetize, phasepoly);
+}
+
+namespace {
+
+// Greedy boundary selection: gadgetize the highest-benefit region boundaries whose merged region
+// still fits the budget, filling toward the ceiling. Benefit proxy = shared z-active qubits between
+// adjacent regions (combinable parity structure). Returns the chosen boundary indices (possibly
+// empty if even one merge does not fit). Pure: no optimization runs.
+std::vector<size_t> plan_boundaries(Tableau const& tableau, size_t budget_bytes) {
+    // The budget itself is the ceiling (cgroup memory.max is the real hard enforcer; no fudge margin).
+    // Headroom = budget minus the live resident baseline (QCir DAG + un-widened tableau already loaded);
+    // predict_peak_bytes returns the structural GROWTH on top, so a plan fits iff growth <= headroom.
+    auto const ceiling   = budget_bytes;
+    auto const baseline  = current_rss_bytes();
+    auto const base_n    = tableau.n_qubits();
+
+    // s_clifford = number of StabilizerTableau blocks. extended_with_ancillae widens ALL of them to the
+    // global width, so this (fixed) count is the driver of the gadgetize-stage WIDEN cost.
+    size_t s_clifford = 0;
+    for (size_t i = 0; i < tableau.size(); ++i) {
+        if (std::holds_alternative<StabilizerTableau>(tableau[i])) ++s_clifford;
+    }
+
+    // Per-region term count and z-active qubit mask, in pipeline order.
+    std::vector<size_t> region_m;
+    std::vector<std::vector<bool>> region_z;
+    std::vector<size_t> region_idx;
+    for (size_t i = 0; i < tableau.size(); ++i) {
+        auto const* pr = std::get_if<std::vector<PauliRotation>>(&tableau[i]);
+        if (pr == nullptr) continue;
+        region_idx.push_back(i);
+        region_m.push_back(pr->size());
+        std::vector<bool> z(base_n, false);
+        for (auto const& rot : *pr) {
+            for (size_t q = 0; q < base_n; ++q) {
+                if (rot.pauli_product().is_z_set(q)) z[q] = true;
+            }
+        }
+        region_z.push_back(std::move(z));
+    }
+    auto const R = region_idx.size();
+    if (R < 2) return {};
+
+    // boundary b is between region b and b+1. Hadamard cost + benefit proxy per boundary.
+    std::vector<size_t> bh(R - 1, 0);
+    std::vector<size_t> benefit(R - 1, 0);
+    for (size_t b = 0; b + 1 < R; ++b) {
+        for (size_t i = region_idx[b] + 1; i < region_idx[b + 1]; ++i) {
+            if (auto const* st = std::get_if<StabilizerTableau>(&tableau[i])) bh[b] += count_hadamards(*st);
+        }
+        for (size_t q = 0; q < base_n; ++q) {
+            if (region_z[b][q] && region_z[b + 1][q]) ++benefit[b];
+        }
+    }
+
+    // prefix sums of region_m for O(1) group term counts.
+    std::vector<size_t> prefix_m(R + 1, 0);
+    for (size_t r = 0; r < R; ++r) prefix_m[r + 1] = prefix_m[r] + region_m[r];
+    auto const m_total = prefix_m[R];  // all resident rotations (widen-resident block)
+
+    // The widen is GLOBAL: extended_with_ancillae(sum of selected boundary Hadamards) widens the whole
+    // tableau, so n_total grows with every selected boundary. Each region (merged or not) is later
+    // phasepoly-optimized at n_total, so the phasepoly term uses the largest region's term count.
+    std::vector<bool> selected(R - 1, false);
+    size_t total_anc    = 0;  // accumulated ancillae (= internal Hadamards) of selected boundaries
+    size_t max_region_m = *std::max_element(region_m.begin(), region_m.end());
+    while (true) {
+        bool found          = false;
+        size_t best_b       = 0;
+        size_t best_benefit = 0;
+        size_t best_predict = std::numeric_limits<size_t>::max();
+        for (size_t b = 0; b + 1 < R; ++b) {
+            if (selected[b]) continue;
+            // group that results from also selecting b: extend left/right over already-selected boundaries.
+            size_t lo = b;
+            while (lo > 0 && selected[lo - 1]) --lo;
+            size_t hi = b + 1;
+            while (hi + 1 < R && selected[hi]) ++hi;
+            auto const cand_group_m = prefix_m[hi + 1] - prefix_m[lo];
+            auto const cand_n       = base_n + total_anc + bh[b];  // selecting b adds only bh[b] new ancillae
+            auto const cand_pred    = baseline + predict_peak_bytes(cand_n, s_clifford, m_total,
+                                                                    std::max(max_region_m, cand_group_m));
+            if (cand_pred > ceiling) continue;  // would not fit the budget
+            if (!found || benefit[b] > best_benefit ||
+                (benefit[b] == best_benefit && cand_pred < best_predict)) {
+                found        = true;
+                best_b       = b;
+                best_benefit = benefit[b];
+                best_predict = cand_pred;
+            }
+        }
+        if (!found) break;
+        selected[best_b] = true;
+        total_anc += bh[best_b];
+        // update largest-region term count with the group now containing best_b
+        size_t lo = best_b;
+        while (lo > 0 && selected[lo - 1]) --lo;
+        size_t hi = best_b + 1;
+        while (hi + 1 < R && selected[hi]) ++hi;
+        max_region_m = std::max(max_region_m, prefix_m[hi + 1] - prefix_m[lo]);
+    }
+
+    std::vector<size_t> result;
+    for (size_t b = 0; b + 1 < R; ++b) {
+        if (selected[b]) result.push_back(b);
+    }
+
+    // Developer diagnostic (debug level only -- never shown at the default user-facing level, so it
+    // does not surface the predicted-peak / baseline internals). Lets a verification run inspect the
+    // planner's decision with `--verbose`.
+    auto const total_h   = std::accumulate(bh.begin(), bh.end(), size_t{0});
+    auto const predicted = baseline + predict_peak_bytes(base_n + total_anc, s_clifford, m_total, max_region_m);
+    constexpr double mib = 1024.0 * 1024.0;
+    spdlog::debug(
+        "gadgetize budget {:.0f} MiB: selected {} of {} internal Hadamards (n {} -> {}, s_clifford {}, "
+        "m_region {}); predicted peak {:.0f} MiB (baseline {:.0f} MiB)",
+        static_cast<double>(budget_bytes) / mib, total_anc, total_h, base_n, base_n + total_anc,
+        s_clifford, max_region_m,
+        static_cast<double>(predicted) / mib, static_cast<double>(baseline) / mib);
+    return result;
+}
+
+}  // namespace
+
+bool gadgetize_within_budget(Tableau& tableau, size_t budget_bytes) {
+    auto const selected = plan_boundaries(tableau, budget_bytes);
+    if (selected.empty()) return false;  // budget too small / nothing to gadgetize
+    return gadgetize_internal_hadamards(tableau, selected);
 }
 
 }  // namespace qsyn::tableau
