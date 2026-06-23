@@ -21,6 +21,7 @@
 #include "tensor/qtensor.hpp"
 #include "util/data_structure_manager_common_cmd.hpp"
 #include "util/dvlab_string.hpp"
+#include "util/memory_budget.hpp"
 #include "util/phase.hpp"
 #include "util/text_format.hpp"
 
@@ -199,8 +200,17 @@ dvlab::Command tableau_optimization_cmd(TableauMgr& tableau_mgr) {
             methods.add_parser("hopt")
                 .description("Minimize the number of Hadamard gates and internal Hadamard gates in the tableau");
 
-            methods.add_parser("gadgetize")
-                .description("Gadgetize every internal Hadamard into a fresh ancilla, merging the Hadamard-bounded phase-polynomial regions. Run before phasepoly so the optimizer sees one large polynomial. Keeps ancillae (initialized |0>)");
+            auto gadgetize_parser =
+                methods.add_parser("gadgetize")
+                    .description("Gadgetize internal Hadamards into fresh ancillae, merging the Hadamard-bounded phase-polynomial regions. Run before phasepoly so the optimizer sees larger polynomials. Keeps ancillae (initialized |0>). With no option, gadgetizes every internal Hadamard; with a memory budget, gadgetizes the most that keeps the later optimization within the budget");
+
+            auto gadgetize_budget = gadgetize_parser.add_mutually_exclusive_group();
+            gadgetize_budget.add_argument<std::string>("-m", "--memory-limit")
+                .default_value("")
+                .help("memory budget for the later phase-polynomial optimization (e.g. 16G, 512M); gadgetize the most that stays within it");
+            gadgetize_budget.add_argument<bool>("--adaptive")
+                .action(store_true)
+                .help("use the available system memory as the budget (shortcut for --memory-limit with the detected free memory)");
 
             auto phasepoly_parser = methods.add_parser("phasepoly")
                                         .description("Reduce the number of terms for phase polynomials in the Tableau");
@@ -315,12 +325,31 @@ dvlab::Command tableau_optimization_cmd(TableauMgr& tableau_mgr) {
                     minimize_internal_hadamards(*tableau_mgr.get());
                     tableau_mgr.add_procedure("InternalHOpt");
                     break;
-                case OptimizationMethod::gadgetize:
-                    if (!gadgetize_internal_hadamards(*tableau_mgr.get())) {
-                        return dvlab::CmdExecResult::error;
+                case OptimizationMethod::gadgetize: {
+                    auto const mem_str  = parser.get<std::string>("--memory-limit");
+                    auto const adaptive = parser.get<bool>("--adaptive");
+                    if (!adaptive && mem_str.empty()) {
+                        // No budget: gadgetize every internal Hadamard (unchanged behavior).
+                        if (!gadgetize_internal_hadamards(*tableau_mgr.get())) {
+                            return dvlab::CmdExecResult::error;
+                        }
+                    } else {
+                        auto const budget = adaptive
+                                                ? dvlab::utils::available_memory_bytes()
+                                                : dvlab::utils::parse_memory_size(mem_str);
+                        if (!budget) {
+                            spdlog::error(adaptive ? "Could not determine the available system memory!!"
+                                                   : fmt::format("Invalid memory budget \"{}\"!!", mem_str));
+                            return dvlab::CmdExecResult::error;
+                        }
+                        if (!gadgetize_within_budget(*tableau_mgr.get(), *budget)) {
+                            spdlog::error("The memory budget is too small to gadgetize anything; raise it or omit gadgetize for the non-gadget baseline!!");
+                            return dvlab::CmdExecResult::error;
+                        }
                     }
                     tableau_mgr.add_procedure("Gadgetize");
                     break;
+                }
                 case OptimizationMethod::phase_polynomial_optimization:
                     do_phase_polynomial_optimization();
                     tableau_mgr.add_procedure("PhasePolyOpt");

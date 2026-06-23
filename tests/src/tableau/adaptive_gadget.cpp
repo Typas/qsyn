@@ -1,10 +1,15 @@
 #include "tableau/optimize/adaptive_gadget.hpp"
 
+#include <fmt/format.h>
+
 #include <catch2/catch_test_macros.hpp>
 #include <cstddef>
 #include <limits>
 #include <optional>
+#include <span>
+#include <string>
 #include <variant>
+#include <array>
 #include <vector>
 
 #include "convert/qcir_to_tableau.hpp"
@@ -243,5 +248,111 @@ TEST_CASE("gadgetization never increases the T-count over the no-gadget baseline
 
         REQUIRE(pipeline_t_count(*qcir, /*gadgetize=*/true) <=
                 pipeline_t_count(*qcir, /*gadgetize=*/false));
+    }
+}
+
+// predict_peak_bytes is a sum of exact sizeof / paper-dimension terms (no fitted magic number); the
+// planner adds the live RSS baseline on top. It must (a) equal the explicit structural formula -- this
+// is the "no magic numbers" guard: if anyone slips in an unexplained constant, the recomputation here
+// diverges -- and (b) be monotonic, so more gadgetization (larger n / s_clifford / m) predicts a larger
+// peak (the basis of the full > adaptive > no-gadget memory ordering).
+TEST_CASE("predict_peak_bytes is the exact structural sum and is monotonic", "[tableau][adaptive-gadget]") {
+    auto const expected = [](size_t n, size_t s, size_t mt, size_t mr) {
+        auto const stab = (2 * n) * (2 * n + 1) / 8 + (2 * n) * size_t{32};  // bits + PauliProduct(32 B)
+        auto const rot  = (2 * n + 1) / 8 + size_t{48};                      // bits + PauliRotation(48 B)
+        auto const gad  = (3 * (s * stab + mt * rot) + 24 * (2 * n) * (2 * n)) / 100 * 150;  // 3 copies x1.5 frag
+        auto const cn2  = n * (n - 1) / 2;
+        auto const pp   = 2 * mr * (n + cn2) + mr * mr + n * mr;             // FastTODD L + augmented + A
+        return std::max(gad, pp);
+    };
+    SECTION("equals the explicit sizeof/paper formula (no hidden constant)") {
+        for (auto const [n, s, mt, mr] : std::vector<std::array<size_t, 4>>{
+                 {16, 50, 200, 47}, {351, 200, 1019, 211}, {1115, 1145, 3517, 3517}}) {
+            CHECK(predict_peak_bytes(n, s, mt, mr) == expected(n, s, mt, mr));
+        }
+    }
+    SECTION("monotonic non-decreasing in n, s_clifford, and m_region") {
+        CHECK(predict_peak_bytes(100, 50, 200, 100) >= predict_peak_bytes(50, 50, 200, 100));   // n
+        CHECK(predict_peak_bytes(100, 80, 200, 100) >= predict_peak_bytes(100, 40, 200, 100));  // s_clifford
+        CHECK(predict_peak_bytes(100, 50, 200, 400) >= predict_peak_bytes(100, 50, 200, 100));  // m_region
+        CHECK(predict_peak_bytes(1115, 1145, 3517, 3517) > predict_peak_bytes(84, 40, 237, 100));
+    }
+}
+
+namespace {
+// Serialize a tableau to a canonical string for byte-identical comparison.
+std::string serialize(Tableau const& t) {
+    std::string s;
+    for (auto const& sub : t) s += fmt::format("{}\n----\n", sub);
+    return s;
+}
+
+// Build C0 . T(q0) . [H] . T(q0) . [H] . T(q0) over 2 qubits: 3 regions, 2 internal-H boundaries.
+Tableau three_region_two_boundary() {
+    auto c0 = StabilizerTableau{2};
+    auto p0 = std::vector<PauliRotation>{PauliRotation(PauliProduct("ZI"), Phase(1, 4))};
+    auto c1 = StabilizerTableau{2};
+    c1.h(0);
+    auto p1 = std::vector<PauliRotation>{PauliRotation(PauliProduct("ZI"), Phase(1, 4))};
+    auto c2 = StabilizerTableau{2};
+    c2.h(0);
+    auto p2 = std::vector<PauliRotation>{PauliRotation(PauliProduct("ZI"), Phase(1, 4))};
+    return Tableau{c0, p0, c1, p1, c2, p2};
+}
+}  // namespace
+
+// GOLDEN INVARIANT: selecting EVERY boundary must reproduce the no-arg (gadgetize-everything)
+// result byte-for-byte. This pins the selective overload against the proven no-arg transform.
+TEST_CASE("selective gadgetize with all boundaries equals the no-arg overload", "[tableau][adaptive-gadget]") {
+    auto full = three_region_two_boundary();
+    auto sel  = full;  // copy
+
+    REQUIRE(gadgetize_internal_hadamards(full));  // no-arg: gadgetize everything
+
+    auto const boundaries = std::vector<size_t>{0, 1};  // both boundaries
+    REQUIRE(gadgetize_internal_hadamards(sel, std::span<size_t const>{boundaries}));
+
+    CHECK(full.n_qubits() == sel.n_qubits());
+    CHECK(full.n_pauli_rotations() == sel.n_pauli_rotations());
+    CHECK(serialize(full) == serialize(sel));
+}
+
+// Selecting a SUBSET gadgetizes only those boundaries: merged where selected, separate elsewhere.
+TEST_CASE("selective gadgetize with a subset leaves unselected boundaries separate", "[tableau][adaptive-gadget]") {
+    SECTION("select only boundary 0 -> merge regions 0,1; region 2 stays separate") {
+        auto t = three_region_two_boundary();
+        auto const boundaries = std::vector<size_t>{0};
+        REQUIRE(gadgetize_internal_hadamards(t, std::span<size_t const>{boundaries}));
+
+        CHECK(t.n_qubits() == 3);                 // one ancilla (boundary 0 had one H)
+        CHECK(all_rotations_diagonal(t));         // every region diagonal
+        // boundary 1's Hadamard is NOT gadgetized -> it remains an internal-block Hadamard
+        CHECK(count_internal_block_hadamards(t) == 1);
+        // still has >1 region (regions not all merged into one)
+        CHECK(t.n_pauli_rotations() >= 2);
+    }
+    SECTION("empty / out-of-range selections do nothing and report false") {
+        auto t = three_region_two_boundary();
+        CHECK_FALSE(gadgetize_internal_hadamards(t, std::span<size_t const>{}));
+        auto const oob = std::vector<size_t>{99};
+        CHECK_FALSE(gadgetize_internal_hadamards(t, std::span<size_t const>{oob}));
+    }
+}
+
+// gadgetize_within_budget: planner + selective transform end to end.
+TEST_CASE("gadgetize_within_budget gadgetizes within the budget or reports false", "[tableau][adaptive-gadget]") {
+    SECTION("a generous budget reproduces gadgetize-everything") {
+        auto t    = three_region_two_boundary();
+        auto full = t;
+        REQUIRE(gadgetize_within_budget(t, static_cast<size_t>(8) * 1024 * 1024 * 1024));  // 8 GiB
+        REQUIRE(gadgetize_internal_hadamards(full));
+        CHECK(t.n_qubits() == full.n_qubits());
+        CHECK(serialize(t) == serialize(full));
+    }
+    SECTION("a tiny budget gadgetizes nothing and returns false (tableau unchanged)") {
+        auto t = three_region_two_boundary();
+        CHECK_FALSE(gadgetize_within_budget(t, static_cast<size_t>(1)));
+        CHECK(t.n_qubits() == 2);
+        CHECK(count_internal_block_hadamards(t) == 2);  // both internal Hadamards still present
     }
 }
