@@ -260,7 +260,7 @@ TEST_CASE("predict_peak_bytes is the exact structural sum and is monotonic", "[t
     auto const expected = [](size_t n, size_t s, size_t mt, size_t mr) {
         auto const stab = (2 * n) * (2 * n + 1) / 8 + (2 * n) * size_t{32};  // bits + PauliProduct(32 B)
         auto const rot  = (2 * n + 1) / 8 + size_t{48};                      // bits + PauliRotation(48 B)
-        auto const gad  = (3 * (s * stab + mt * rot) + 24 * (2 * n) * (2 * n)) / 100 * 150;  // 3 copies x1.5 frag
+        auto const gad  = (3 * (s * stab + mt * rot) + 24 * (2 * n) * (2 * n)) / 100 * 175;  // 3 copies x1.75 frag
         auto const cn2  = n * (n - 1) / 2;
         auto const pp   = 2 * mr * (n + cn2) + mr * mr + n * mr;             // FastTODD L + augmented + A
         return std::max(gad, pp);

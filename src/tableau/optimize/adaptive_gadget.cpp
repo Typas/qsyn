@@ -374,17 +374,23 @@ constexpr size_t kPauliRotationBytes = 48;
 // separators+regions), and `out` (assembled from middle). Profiled on hwb10 (RSS probe, 2026-06-23).
 constexpr size_t kWidenCopies = 3;
 // The one allocator-dependent knob: real RSS = structural bytes x allocator overhead, which no sizeof
-// captures and which varies by allocator. User-overridable via env QSYN_GADGET_HEADROOM (a percent);
-// default 150 measured on glibc. Re-validate per allocator (jemalloc/tcmalloc/mimalloc/musl) -- an
-// under-value OOMs under predict-only enforcement.
-// FIXME: 150 is the glibc (best-case) value -- a cross-allocator sweep showed mimalloc3 needs ~+18% and
-// the spread grows with scale; the cross-allocator / large-budget default policy is untested, unresolved.
+// captures and which varies by allocator. User-overridable via env QSYN_GADGET_HEADROOM (a percent).
+// Default 175, resolved by a cross-allocator sweep under the THREADED phasepoly executor (k concurrent
+// regions compound fragmentation): scripts/headroom-sweep.sh, results in bench2x2/l3-headroom/. glibc is
+// the binding allocator -- it retains freed gadgetize arenas, so the gadgetize and phasepoly stages sum
+// in RSS instead of max(); at threads=8 the old 150 left predicted < actual (UNSAFE) on hwb10@256M and
+// was killed under the cgroup cap on hwb11@512M. 175 restores predicted >= actual: +8.8% margin
+// (hwb10@256M) and +4.4% (hwb11@512M). jemalloc and mimalloc2/3 are already safe at 150 (mimalloc3 is
+// the *safest*, not the worst as a stale note once claimed). The glibc margin compresses with scale
+// (8.8% -> 4.4% as the budget doubled), so very large budgets should pin a higher QSYN_GADGET_HEADROOM;
+// a malloc_trim() at the gadgetize->phasepoly boundary (return arenas, break the stage-sum) is the
+// structural alternative to padding -- deferred, see docs/adaptive-gadget-l3-worklog.md.
 size_t gadget_alloc_headroom_percent() {
     static size_t const pct = []() -> size_t {
         if (char const* e = std::getenv("QSYN_GADGET_HEADROOM")) {
             if (auto const v = std::strtoul(e, nullptr, 10); v > 0) return static_cast<size_t>(v);
         }
-        return 150;
+        return 175;
     }();
     return pct;
 }
