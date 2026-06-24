@@ -220,6 +220,18 @@ dvlab::Command tableau_optimization_cmd(TableauMgr& tableau_mgr) {
                 .constraint(choices_allow_prefix({"todd", "tohpe", "fasttodd"}))
                 .help("Phase polynomial optimization strategy");
 
+            phasepoly_parser.add_argument<size_t>("-j", "--threads")
+                .default_value(1)
+                .help("number of worker threads optimizing independent regions in parallel (default 1 = sequential; >1 requires a memory budget)");
+
+            auto phasepoly_budget = phasepoly_parser.add_mutually_exclusive_group();
+            phasepoly_budget.add_argument<std::string>("-m", "--memory-limit")
+                .default_value("")
+                .help("memory budget bounding the concurrent footprint (e.g. 16G, 512M); required when --threads > 1");
+            phasepoly_budget.add_argument<bool>("--adaptive")
+                .action(store_true)
+                .help("use the available system memory as the budget (shortcut for --memory-limit with the detected free memory)");
+
             auto matpar_parser = methods.add_parser("matpar")
                                      .description("partition the Pauli rotations into simultaneously-implementable tableaux. This option requires all Pauli rotations to be diagonal");
 
@@ -273,7 +285,7 @@ dvlab::Command tableau_optimization_cmd(TableauMgr& tableau_mgr) {
                 return dvlab::CmdExecResult::error;
             }
 
-            auto const do_phase_polynomial_optimization = [&]() {
+            auto const do_phase_polynomial_optimization = [&]() -> bool {
                 auto const phasepoly_strategy_str = parser.get<std::string>("strategy");
 
                 auto const phasepoly_strategy = std::invoke([&]() -> std::unique_ptr<PhasePolynomialOptimizationStrategy> {
@@ -286,7 +298,30 @@ dvlab::Command tableau_optimization_cmd(TableauMgr& tableau_mgr) {
                     }
                     return nullptr;
                 });
-                optimize_phase_polynomial(*tableau_mgr.get(), *phasepoly_strategy);
+
+                auto const num_threads = parser.get<size_t>("--threads");
+                auto const mem_str     = parser.get<std::string>("--memory-limit");
+                auto const adaptive    = parser.get<bool>("--adaptive");
+
+                std::optional<size_t> budget;
+                if (adaptive || !mem_str.empty()) {
+                    budget = adaptive ? dvlab::utils::available_memory_bytes()
+                                      : dvlab::utils::parse_memory_size(mem_str);
+                    if (!budget) {
+                        spdlog::error(adaptive ? "Could not determine the available system memory!!"
+                                               : fmt::format("Invalid memory budget \"{}\"!!", mem_str));
+                        return false;
+                    }
+                }
+                if (num_threads > 1 && !budget) {
+                    spdlog::error("--threads > 1 requires a memory budget (--memory-limit or --adaptive)!!");
+                    return false;
+                }
+                if (!optimize_phase_polynomial(*tableau_mgr.get(), *phasepoly_strategy, num_threads, budget)) {
+                    spdlog::error("The memory budget is too small to optimize a phase-polynomial region; raise it!!");
+                    return false;
+                }
+                return true;
             };
 
             auto const do_matroid_partition = [&]() {
@@ -351,7 +386,9 @@ dvlab::Command tableau_optimization_cmd(TableauMgr& tableau_mgr) {
                     break;
                 }
                 case OptimizationMethod::phase_polynomial_optimization:
-                    do_phase_polynomial_optimization();
+                    if (!do_phase_polynomial_optimization()) {
+                        return dvlab::CmdExecResult::error;
+                    }
                     tableau_mgr.add_procedure("PhasePolyOpt");
                     break;
                 case OptimizationMethod::matroid_partition:

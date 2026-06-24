@@ -89,4 +89,9 @@ bool gadgetize_within_budget(Tableau& tableau, size_t budget_bytes);
 // plan under the budget because exceeding it is an unrecoverable OOM kill (cgroup memory.max enforces).
 size_t predict_peak_bytes(size_t n, size_t s_clifford, size_t m_total, size_t m_region);
 
+// Predicted peak RSS (bytes) of optimizing ONE phase-poly region of `m_region` terms at width `n` --
+// the FastTODD L-matrix + augmented + phase-poly matrix term of predict_peak_bytes, broken out for
+// sizing a single region. Upper bound (predict >= actual).
+size_t phasepoly_region_bytes(size_t n, size_t m_region);
+
 }  // namespace qsyn::tableau

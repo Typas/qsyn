@@ -56,6 +56,8 @@ struct FastToddPhasePolynomialOptimizationStrategy : public PhasePolynomialOptim
 void optimize_phase_polynomial(StabilizerTableau& clifford, std::vector<PauliRotation>& polynomial, PhasePolynomialOptimizationStrategy const& strategy);
 void optimize_phase_polynomial(Tableau& tableau, PhasePolynomialOptimizationStrategy const& strategy);
 
+bool optimize_phase_polynomial(Tableau& tableau, PhasePolynomialOptimizationStrategy const& strategy, size_t num_threads, std::optional<size_t> budget_bytes);
+
 struct MatroidPartitionStrategy {
     using Polynomial                    = std::vector<PauliRotation>;
     using Partitions                    = std::vector<Polynomial>;
