@@ -20,17 +20,18 @@ qubits_of(){ rg -m1 '^\.v ' "$1" 2>/dev/null | awk '{print NF-1}'; }
 run_qsyn(){ # circuit run infile
   local c="$1" run="$2" in="$3" row="$RES/$1__$2.row"
   [ -f "$row" ] && return
-  local n sani log start sec rc st T= note=
+  local n sani log start sec rc st T= peak= note=
   n=$(qubits_of "$in"); sani="$B/sani/${c}__${run}.qc"; log="$B/logs-new/${c}__${run}.log"
   sanitize "$in" "$sani"; start=$(date +%s)
-  ( ulimit -v "$MEMKB" 2>/dev/null; exec timeout -k 10 "$CAP" "$QSYN" -q --no-version -c \
+  ( ulimit -v "$MEMKB" 2>/dev/null; exec /usr/bin/time -v timeout -k 10 "$CAP" "$QSYN" -q --no-version -c \
       "qcir read $sani; convert qcir tableau; tableau optimize tmerge; tableau optimize hopt; tableau optimize phasepoly fasttodd; convert tableau qcir; qcir print --stat; quit -f" ) >"$log" 2>&1
   rc=$?; sec=$(( $(date +%s) - start ))
+  peak=$(rg -o 'Maximum resident set size .kbytes.: [0-9]+' "$log" | rg -o '[0-9]+$' | tail -1)
   if [ $rc -eq 124 ] || [ $rc -eq 137 ]; then st=TLE
   elif rg -qi 'bad_alloc|out of memory|std::length_error' "$log"; then st=MLE
   elif [ $rc -ne 0 ] || rg -qi 'error' "$log"; then st=ERR; note="rc=$rc"
   else st=ok; T=$(rg -o 'T-family\s*:\s*[0-9]+' "$log" | rg -o '[0-9]+$' | tail -1); fi
-  printf '%s,%s,%s,%s,%s,%s,%s\n' "$c" "$run" "${n:-?}" "${T:-NA}" "$sec" "$st" "$note" >"$row"
+  printf '%s,%s,%s,%s,%s,%s,%s,%s\n' "$c" "$run" "${n:-?}" "${T:-NA}" "$sec" "${peak:-NA}" "$st" "$note" >"$row"
   echo "[$run] $c -> ${T:-NA}T ${sec}s $st"
 }
 
@@ -45,5 +46,5 @@ while IFS=, read -r c _g _tier _n _hl _hp _ht _htt _vp _vt _vtt _vf file _notes;
   [ -f "$raw" ] && { run_qsyn "$c" qsyn_raw "$raw" & throttle; }
 done < "$PAPER"
 wait
-{ echo "circuit,run,n,T,seconds,status,note"; cat "$RES"/*.row 2>/dev/null | sort; } > "$B/all-new.csv"
+{ echo "circuit,run,n,T,seconds,peak_kb,status,note"; cat "$RES"/*.row 2>/dev/null | sort; } > "$B/all-new.csv"
 echo "[rerun] DONE $(date '+%H:%M:%S') -> $B/all-new.csv"
