@@ -35,9 +35,14 @@ namespace qsyn::tableau {
 
 namespace {
 
-// Grow `cone` along the circuit DAG from `start`, following predecessors
-// (forward == false) or successors (forward == true). Uses only QCir's public
-// neighbor accessors, so no qcir-module change is needed.
+/**
+ * @brief Grow `cone` along the circuit DAG from `start`, using only QCir's public neighbor accessors.
+ *
+ * @param qcir the circuit
+ * @param start seed gate
+ * @param cone (in/out) reachable set to grow
+ * @param forward follow successors if true, predecessors if false
+ */
 void add_cone(qcir::QCir const& qcir, qcir::QCirGate* start,
               std::unordered_set<qcir::QCirGate*>& cone, bool forward) {
     std::queue<size_t> queue;
@@ -55,13 +60,16 @@ void add_cone(qcir::QCir const& qcir, qcir::QCirGate* start,
     }
 }
 
-// The set of *internal* Hadamards: an H with a non-Clifford (T-like) gate
-// reachable both backward and forward through the circuit DAG. This is the same
-// causal-cone rule qsyn uses for its internal-H statistic
-// (qcir.cpp get_gate_statistics) and matches the structural count exactly. A
-// naive global first/last-rotation span over get_gates() is WRONG here because
-// get_gates() is topologically reordered, so boundary Hadamards on quiet wires
-// land between the global first/last rotation and get miscounted as internal.
+/**
+ * @brief The internal Hadamards: an H with a non-Clifford gate reachable both backward and forward.
+ *
+ * Uses the causal-cone rule (matching qcir.cpp get_gate_statistics); a naive first/last-rotation span
+ * over get_gates() is WRONG because get_gates() is topologically reordered, so boundary Hadamards on
+ * quiet wires get miscounted as internal.
+ *
+ * @param qcir the circuit
+ * @return the set of internal Hadamard gates
+ */
 std::unordered_set<qcir::QCirGate*> internal_hadamards(qcir::QCir const& qcir) {
     std::unordered_set<qcir::QCirGate*> has_rotation_after;   // a non-Clifford lies ahead
     std::unordered_set<qcir::QCirGate*> has_rotation_before;  // a non-Clifford lies behind
@@ -81,10 +89,15 @@ std::unordered_set<qcir::QCirGate*> internal_hadamards(qcir::QCir const& qcir) {
     return internal;
 }
 
-// Emit the fixed Hadamard gadget body onto data wire q and ancilla a:
-//     S(a) . S(q) . CX(q,a) . S(a) . Z(a) . CX(a,q) . CX(q,a)
-// The gadget contains no Hadamard; the data wire stays on q (no remap). The
-// ancilla's Hadamard prep/uncompute are emitted separately, around the body.
+/**
+ * @brief Emit the fixed Hadamard gadget body S(a).S(q).CX(q,a).S(a).Z(a).CX(a,q).CX(q,a) onto `out`.
+ *
+ * The body has no Hadamard; the ancilla's prep/uncompute H are emitted separately, around it.
+ *
+ * @param out (in/out) circuit to append to
+ * @param q data wire
+ * @param a fresh ancilla
+ */
 void emit_hadamard_gadget(qcir::QCir& out, size_t q, size_t a) {
     out.append(qcir::SGate(), {a});
     out.append(qcir::SGate(), {q});
@@ -97,6 +110,15 @@ void emit_hadamard_gadget(qcir::QCir& out, size_t q, size_t a) {
 
 }  // namespace
 
+/**
+ * @brief Gadgetize every internal Hadamard, returning a wider circuit with one ancilla per gadget.
+ *
+ * Leading/trailing Hadamards stay in place; each gadgetized H adds an ancilla and the fixed Clifford
+ * body, leaving the non-Clifford region diagonal over the extended qubit set. Ancillae are kept (|0>).
+ *
+ * @param qcir input circuit
+ * @return the widened circuit (n + #internal-Hadamards qubits)
+ */
 qcir::QCir gadgetize_all_internal_hadamards(qcir::QCir const& qcir) {
     auto const n        = qcir.get_num_qubits();
     auto const internal = internal_hadamards(qcir);
@@ -130,10 +152,13 @@ qcir::QCir gadgetize_all_internal_hadamards(qcir::QCir const& qcir) {
 
 namespace {
 
-// Splice the fixed Hadamard gadget body in place of a Hadamard on data wire q,
-// using fresh ancilla a (minus the prep/uncompute H, which are handled at the
-// boundaries):
-//     S(a) . S(q) . CX(q,a) . S(a) . Z(a) . CX(a,q) . CX(q,a)
+/**
+ * @brief Append the fixed Hadamard gadget body (minus prep/uncompute H) to a Clifford operator string.
+ *
+ * @param ops (in/out) operator string to append to
+ * @param q data wire
+ * @param a fresh ancilla
+ */
 void append_gadget_body(CliffordOperatorString& ops, size_t q, size_t a) {
     ops.emplace_back(CliffordOperatorType::s, std::array<size_t, 2>{a, 0});
     ops.emplace_back(CliffordOperatorType::s, std::array<size_t, 2>{q, 0});
@@ -144,6 +169,12 @@ void append_gadget_body(CliffordOperatorString& ops, size_t q, size_t a) {
     ops.emplace_back(CliffordOperatorType::cx, std::array<size_t, 2>{q, a});
 }
 
+/**
+ * @brief Count the Hadamards in a stabilizer tableau's Clifford-operator decomposition.
+ *
+ * @param st the tableau
+ * @return the Hadamard count
+ */
 size_t count_hadamards(StabilizerTableau const& st) {
     size_t count = 0;
     for (auto const& op : extract_clifford_operators(st)) {
@@ -152,8 +183,10 @@ size_t count_hadamards(StabilizerTableau const& st) {
     return count;
 }
 
-// One gadgetized merge-group. `clifford` is the residual front Clifford from the bounded merge
-// (c_int); `region` is the merged diagonal phase polynomial.
+/**
+ * @brief One gadgetized merge-group: `clifford` is the residual front Clifford (c_int); `region` is
+ *        the merged diagonal phase polynomial.
+ */
 struct GadgetizedSpan {
     StabilizerTableau clifford;
     std::vector<PauliRotation> region;
@@ -190,6 +223,15 @@ GadgetizedSpan gadgetize_span(Tableau& ext, size_t lo, size_t hi, size_t& anc_ne
 
 }  // namespace
 
+/**
+ * @brief Gadgetize all internal Hadamards in place, tableau-native (no lossy circuit round-trip).
+ *
+ * Internal Hadamards live in the Clifford blocks strictly between the first and last phase-poly region;
+ * the tableau is widened by their count and the whole interior is merged into one diagonal region.
+ *
+ * @param tableau (in/out) tableau to gadgetize
+ * @return true always; unchanged-true when the tableau is empty or has no internal Hadamards
+ */
 bool gadgetize_internal_hadamards(Tableau& tableau) {
     if (tableau.is_empty()) return true;
     auto const n = tableau.n_qubits();
@@ -240,6 +282,13 @@ bool gadgetize_internal_hadamards(Tableau& tableau) {
     return true;
 }
 
+/**
+ * @brief Gadgetize only the internal Hadamards at the selected region boundaries, merging joined regions.
+ *
+ * @param tableau (in/out) tableau to gadgetize
+ * @param selected_boundaries region-pair indices (boundary b joins regions b and b+1); out-of-range ignored
+ * @return false (tableau unchanged) if empty, fewer than two regions, or nothing selected to gadgetize
+ */
 bool gadgetize_internal_hadamards(Tableau& tableau, std::span<size_t const> selected_boundaries) {
     if (tableau.is_empty() || selected_boundaries.empty()) return false;
     auto const n = tableau.n_qubits();
@@ -327,11 +376,12 @@ bool gadgetize_internal_hadamards(Tableau& tableau, std::span<size_t const> sele
     return true;
 }
 
-// Live resident-set size of this process, read from /proc/self/statm (Linux). The planner uses this as
-// the baseline floor instead of a constant: the resident input (QCir DAG + un-widened tableau) varies
-// by orders of magnitude with circuit size, so a fixed floor catastrophically under-counts big inputs.
-// This is a MEASUREMENT, not a fitted number. Returns 0 off Linux (then the floor is just 0 -> the
-// structural terms still bound the growth; macOS is predict-only without an OS backstop anyway).
+/**
+ * @brief Live RSS from /proc/self/statm, used as the planner's baseline floor (not a constant): the
+ *        resident input varies by orders of magnitude with circuit size.
+ *
+ * @return resident bytes, or 0 off Linux (then the structural terms alone bound the growth)
+ */
 size_t current_rss_bytes() {
     std::FILE* f = std::fopen("/proc/self/statm", "r");
     if (f == nullptr) return 0;
@@ -342,23 +392,10 @@ size_t current_rss_bytes() {
     return matched == 2 ? static_cast<size_t>(rss) * static_cast<size_t>(sysconf(_SC_PAGESIZE)) : 0;
 }
 
-// Structural peak-RSS GROWTH (bytes) over the plan-time baseline, for the whole gadgetize -> phasepoly
-// pipeline of a plan that widens the tableau to `n` qubits, where the widened tableau holds `s_clifford`
-// StabilizerTableau blocks + `m_total` resident PauliRotations, and the largest single region to be
-// phasepoly-optimized has `m_region` terms. The planner adds current_rss_bytes() as the baseline.
-//
-// EVERY constant below is a sizeof or a paper dimension (no fitted "engineering coefficient"):
-//   - StabilizerTableau = 2n PauliProducts, each a sul::dynamic_bitset of (2n+1) bits  -> 2n*(2n+1)/8 B
-//     (PauliProduct::_bitset is bit-packed, 1 bit/bit; stabilizer_tableau.hpp / pauli_rotation.hpp).
-//   - PauliRotation     = one (2n+1)-bit bitset                                         -> (2n+1)/8 B.
-//   - CliffordOperator  = pair<u8, array<size_t,2>>                                     -> 24 B.
-//   - FastTODD L-matrix = BooleanMatrix (Row = std::vector<unsigned char>, 1 byte/bit), rows = terms,
-//     cols = n + C(n,2)  (fastTodd.cpp build_l_transpose_row_from_term reserves n + n(n-1)/2); the
-//     l_matrix + l_matrix_transpose pair (x2) + augmented=identity(m) (m^2).
-//
-// sizeof a PauliProduct (== its sole member sul::dynamic_bitset, measured 32 B) and a PauliRotation
-// (PauliProduct + dvlab::Phase, ~48 B). These struct headers dominate the bit payload at small n and
-// were the source of an earlier small-circuit under-prediction, so they are kept as explicit terms.
+// Memory-model constants for predict_peak_bytes. Every one is a sizeof or a paper dimension, not a
+// fitted coefficient; the per-term breakdown is in predict_peak_bytes below. The struct headers
+// (measured 32 B / 48 B) dominate the bit payload at small n and once caused an under-prediction, so
+// they are kept as explicit terms rather than folded in.
 constexpr size_t kPauliProductBytes  = 32;
 constexpr size_t kPauliRotationBytes = 48;
 
@@ -367,19 +404,19 @@ constexpr size_t kPauliRotationBytes = 48;
 // would fit. Safe (only over-predicts, never OOMs), but a tight fix needs an n-dependent multiplier.
 // Collapse runtime also grows ~ s_clifford*n^2.
 //
-// STRUCTURAL: the selective gadgetize transform keeps every Clifford block as a full-width
-// StabilizerTableau, and at peak holds ~3 coexisting full-width copies of that set -- `ext`
-// (extended_with_ancillae, being consumed group-by-group), `middle` (the accumulated output
-// separators+regions), and `out` (assembled from middle).
+// 3 coexisting full-width copies at peak: `ext` (being consumed), `middle` (accumulated output), and
+// `out` (assembled from middle).
 constexpr size_t kWidenCopies = 3;
-// The one allocator-dependent knob: real RSS = structural bytes x allocator overhead, which no sizeof
-// captures and which varies by allocator. User-overridable via env QSYN_GADGET_HEADROOM (a percent).
-// Default 175: under the threaded phasepoly executor, glibc retains freed gadgetize arenas, so the
-// gadgetize and phasepoly stages sum in RSS instead of max(), and a lower value can leave predicted <
-// actual (unsafe) at high thread counts. 175 restores predicted >= actual on glibc; jemalloc/mimalloc
-// are safe lower. The glibc margin compresses as the budget grows, so very large budgets should pin a
-// higher QSYN_GADGET_HEADROOM; a malloc_trim() at the gadgetize->phasepoly boundary (return arenas,
-// break the stage-sum) is the structural alternative to padding -- deferred.
+
+/**
+ * @brief Allocator-overhead knob (percent), overridable via env QSYN_GADGET_HEADROOM.
+ *
+ * Default 175: under the threaded executor glibc retains freed gadgetize arenas, so the stages sum in
+ * RSS instead of max() and a lower value can leave predicted < actual (unsafe); jemalloc/mimalloc are
+ * safe lower. A malloc_trim() at the stage boundary would be the structural alternative -- deferred.
+ *
+ * @return the headroom percentage
+ */
 size_t gadget_alloc_headroom_percent() {
     static size_t const pct = []() -> size_t {
         if (char const* e = std::getenv("QSYN_GADGET_HEADROOM")) {
@@ -390,6 +427,15 @@ size_t gadget_alloc_headroom_percent() {
     return pct;
 }
 
+/**
+ * @brief Predicted peak-RSS growth (bytes) of the gadgetize -> phasepoly pipeline at width n. Upper bound.
+ *
+ * @param n widened qubit count
+ * @param s_clifford number of StabilizerTableau blocks
+ * @param m_total total resident rotations
+ * @param m_region term count of the largest region to optimize
+ * @return predicted structural growth in bytes (the planner adds current_rss_bytes() as the baseline)
+ */
 size_t predict_peak_bytes(size_t n, size_t s_clifford, size_t m_total, size_t m_region) {
     // One widened StabilizerTableau: 2n PauliProducts, each (2n+1) bits packed PLUS the 32 B struct.
     auto const stab_bytes = (2 * n) * (2 * n + 1) / 8 + (2 * n) * kPauliProductBytes;
@@ -407,6 +453,13 @@ size_t predict_peak_bytes(size_t n, size_t s_clifford, size_t m_total, size_t m_
     return std::max(gadgetize, phasepoly_region_bytes(n, m_region));
 }
 
+/**
+ * @brief Predicted peak RSS (bytes) of optimizing one phase-poly region of m_region terms at width n.
+ *
+ * @param n global qubit width
+ * @param m_region region term count
+ * @return upper-bound bytes (the region's L-matrices + augmented + phase-poly matrix)
+ */
 size_t phasepoly_region_bytes(size_t n, size_t m_region) {
     // PHASEPOLY stage (FastTODD, BooleanMatrix::Row = 1 byte/bit): a region runs at the global width n,
     // so its peak is the region's L-matrices + augmented + phase-poly matrix.
@@ -416,10 +469,16 @@ size_t phasepoly_region_bytes(size_t n, size_t m_region) {
 
 namespace {
 
-// Greedy boundary selection: gadgetize the highest-benefit region boundaries whose merged region
-// still fits the budget, filling toward the ceiling. Benefit proxy = shared z-active qubits between
-// adjacent regions (combinable parity structure). Returns the chosen boundary indices (possibly
-// empty if even one merge does not fit). Pure: no optimization runs.
+/**
+ * @brief Greedily select the highest-benefit region boundaries whose merged region still fits budget.
+ *
+ * Benefit proxy = shared z-active qubits between adjacent regions (combinable parity structure). Pure:
+ * runs no optimization.
+ *
+ * @param tableau the tableau to plan over
+ * @param budget_bytes the memory ceiling
+ * @return the chosen boundary indices (empty if not even one merge fits)
+ */
 std::vector<size_t> plan_boundaries(Tableau const& tableau, size_t budget_bytes) {
     // The budget itself is the ceiling (cgroup memory.max is the real hard enforcer; no fudge margin).
     // Headroom = budget minus the live resident baseline (QCir DAG + un-widened tableau already loaded);
@@ -536,6 +595,13 @@ std::vector<size_t> plan_boundaries(Tableau const& tableau, size_t budget_bytes)
 
 }  // namespace
 
+/**
+ * @brief Plan and apply the gadgetization whose predicted phase-poly peak stays under budget_bytes.
+ *
+ * @param tableau (in/out) tableau to gadgetize
+ * @param budget_bytes memory ceiling for the predicted peak
+ * @return false (tableau unchanged) if the budget is too small or there is nothing to gadgetize
+ */
 bool gadgetize_within_budget(Tableau& tableau, size_t budget_bytes) {
     auto const selected = plan_boundaries(tableau, budget_bytes);
     if (selected.empty()) return false;  // budget too small / nothing to gadgetize

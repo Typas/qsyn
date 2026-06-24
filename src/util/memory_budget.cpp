@@ -16,6 +16,14 @@
 
 namespace dvlab::utils {
 
+/**
+ * @brief Parse a memory size ("16G", "512M", "2GiB", or a bare byte count) into bytes.
+ *
+ * Suffixes are 1024-based (K/M/G/T), case-insensitive, with an optional trailing "B"/"iB".
+ *
+ * @param str the size string
+ * @return the byte count, or nullopt on malformed input (keyword forms like "auto" are caller-resolved)
+ */
 std::optional<std::size_t> parse_memory_size(std::string_view str) {
     if (str.empty()) return std::nullopt;
     // strip an optional trailing "B"/"b", then an optional "i"/"I" (so "GiB"/"GB"/"G" all work).
@@ -40,7 +48,12 @@ std::optional<std::size_t> parse_memory_size(std::string_view str) {
 }
 
 namespace {
-// Read a single non-negative integer from a cgroup limit file; "max" / parse failure -> nullopt.
+/**
+ * @brief Read a single non-negative integer from a cgroup limit file.
+ *
+ * @param path the file path
+ * @return the value, or nullopt on "max" or parse failure
+ */
 std::optional<std::size_t> read_uint_file(char const* path) {
     std::ifstream ifs{path};
     std::string tok;
@@ -53,6 +66,11 @@ std::optional<std::size_t> read_uint_file(char const* path) {
 }
 }  // namespace
 
+/**
+ * @brief Best-effort available RAM in bytes (Linux/WSL: /proc/meminfo, clamped by the cgroup limit).
+ *
+ * @return available bytes, or nullopt off Linux (auto mode unsupported there -- pass an explicit budget)
+ */
 std::optional<std::size_t> available_memory_bytes() {
     std::size_t avail = 0;
     std::ifstream meminfo{"/proc/meminfo"};
