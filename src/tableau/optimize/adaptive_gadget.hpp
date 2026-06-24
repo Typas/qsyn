@@ -64,4 +64,10 @@ bool gadgetize_within_budget(Tableau& tableau, size_t budget_bytes);
  */
 size_t predict_peak_bytes(size_t n, size_t s_clifford, size_t m_total, size_t m_region);
 
+/**
+ * @brief Predicted peak RSS (bytes) of optimizing one phase-poly region of m_region terms at width n.
+ *        Upper bound (predict >= actual).
+ */
+size_t phasepoly_region_bytes(size_t n, size_t m_region);
+
 }  // namespace qsyn::tableau

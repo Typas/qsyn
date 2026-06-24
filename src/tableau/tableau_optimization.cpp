@@ -9,17 +9,25 @@
 #include <fmt/core.h>
 #include <spdlog/spdlog.h>
 
+#include <atomic>
+#include <condition_variable>
 #include <functional>
 #include <gsl/narrow>
+#include <mutex>
+#include <optional>
 #include <ranges>
+#include <thread>
 #include <tl/adjacent.hpp>
 #include <tl/to.hpp>
 #include <variant>
 #include <vector>
 
+#include "tableau/optimize/adaptive_gadget.hpp"
 #include "tableau/pauli_rotation.hpp"
 #include "tableau/stabilizer_tableau.hpp"
 #include "tableau/tableau.hpp"
+
+extern bool stop_requested();
 
 namespace qsyn {
 
@@ -285,7 +293,7 @@ void absorb_clifford_rotations(StabilizerTableau& clifford, std::vector<PauliRot
 void properize(StabilizerTableau& clifford, std::vector<PauliRotation>& rotations) {
     merge_rotations(rotations);
 
-    // checks if the phase is in the range [0, π/2)
+    // checks if the phase is in the range [0, pi/2)
     auto const is_proper_phase = [](dvlab::Phase const& phase) {
         auto const numerator   = phase.numerator();
         auto const denominator = phase.denominator();
@@ -376,7 +384,7 @@ void properize(Tableau& tableau) {
 /**
  * @brief merge rotations that are commutative and have the same underlying pauli product.
  *        If a rotation becomes Clifford, absorb it into the initial Clifford operator.
- *        This algorithm is inspired by the paper [[1903.12456] Optimizing T gates in Clifford+T circuit as $π/4$ rotations around Paulis](https://arxiv.org/abs/1903.12456)
+ *        This algorithm is inspired by the paper [[1903.12456] Optimizing T gates in Clifford+T circuit as $\pi/4$ rotations around Paulis](https://arxiv.org/abs/1903.12456)
  *
  * @param clifford
  * @param rotations
@@ -439,6 +447,150 @@ void optimize_phase_polynomial(Tableau& tableau, PhasePolynomialOptimizationStra
     }
 
     remove_identities(tableau);
+}
+
+namespace {
+
+// One unit of independent work: a Clifford-context subtableau plus the contiguous run of phase-poly
+// region subtableaux that share it. Two units touch disjoint subtableau indices, so they run in
+// parallel; the regions inside one unit share a Clifford slot and run in order.
+struct RegionUnit {
+    size_t clifford_idx{};
+    std::vector<size_t> region_idxs;
+};
+
+// Reserve-before-allocate budget gate. A region commits its predicted bytes before doing any work and
+// releases them after; a commit blocks until it fits under `ceiling`, so the live sum never exceeds it.
+class BudgetGate {
+public:
+    explicit BudgetGate(size_t ceiling) : _ceiling{ceiling} {}
+
+    // Returns false if the run was aborted while waiting.
+    bool acquire(size_t bytes) {
+        std::unique_lock lk{_mtx};
+        _cv.wait(lk, [&] { return _failed || _committed + bytes <= _ceiling; });
+        if (_failed) return false;
+        _committed += bytes;
+        return true;
+    }
+    void release(size_t bytes) {
+        {
+            std::lock_guard lk{_mtx};
+            _committed -= bytes;
+        }
+        _cv.notify_all();
+    }
+    void fail() {
+        {
+            std::lock_guard lk{_mtx};
+            _failed = true;
+        }
+        _cv.notify_all();
+    }
+    bool failed() const {
+        std::lock_guard lk{_mtx};
+        return _failed;
+    }
+
+private:
+    size_t _ceiling;
+    size_t _committed{0};
+    bool _failed{false};
+    mutable std::mutex _mtx;
+    std::condition_variable _cv;
+};
+
+}  // namespace
+
+/**
+ * @brief Reduce the number of terms for all phase polynomials in the tableau, optimizing independent
+ *        regions concurrently. The result is independent of the thread count. With at most one thread
+ *        or no budget, falls back to the sequential overload.
+ *
+ * @param tableau
+ * @param strategy
+ * @param num_threads number of worker threads
+ * @param budget_bytes memory budget bounding the concurrent footprint
+ * @return true on success; false (tableau untouched) if no region fits the budget, or false (tableau
+ *         left partially optimized) if a worker fails
+ */
+bool optimize_phase_polynomial(Tableau& tableau, PhasePolynomialOptimizationStrategy const& strategy, size_t num_threads, std::optional<size_t> budget_bytes) {
+    if (num_threads <= 1 || !budget_bytes) {
+        optimize_phase_polynomial(tableau, strategy);
+        return true;
+    }
+    if (tableau.is_empty()) {
+        return true;
+    }
+
+    auto const n       = tableau.n_qubits();
+    auto const ceiling = *budget_bytes;
+
+    // Refuse up front (tableau untouched) if a single region cannot fit -- it would block forever.
+    for (auto const& subtableau : tableau) {
+        if (auto const* pr = std::get_if<std::vector<PauliRotation>>(&subtableau)) {
+            if (phasepoly_region_bytes(n, pr->size()) > ceiling) return false;
+        }
+    }
+
+    // Match the sequential overload's setup: a leading region needs a Clifford in front of it.
+    if (std::holds_alternative<std::vector<PauliRotation>>(tableau.front())) {
+        tableau.insert(tableau.begin(), StabilizerTableau{n});
+    }
+
+    // Build the independent units. Each Clifford subtableau starts a new unit; following regions join it.
+    std::vector<RegionUnit> units;
+    for (size_t i = 0; i < tableau.size(); ++i) {
+        if (std::holds_alternative<std::vector<PauliRotation>>(tableau[i])) {
+            units.back().region_idxs.push_back(i);
+        } else {
+            units.push_back(RegionUnit{i, {}});
+        }
+    }
+    std::erase_if(units, [](RegionUnit const& u) { return u.region_idxs.empty(); });
+    if (units.empty()) {
+        remove_identities(tableau);
+        return true;
+    }
+
+    BudgetGate gate{ceiling};
+    std::atomic<size_t> next_unit{0};
+
+    auto worker = [&] {
+        while (true) {
+            auto const u = next_unit.fetch_add(1);
+            if (u >= units.size() || gate.failed()) break;
+            auto& clifford = std::get<StabilizerTableau>(tableau[units[u].clifford_idx]);
+            for (auto const ridx : units[u].region_idxs) {
+                if (stop_requested() || gate.failed()) {
+                    gate.fail();
+                    return;
+                }
+                auto& region       = std::get<std::vector<PauliRotation>>(tableau[ridx]);
+                auto const reserve = phasepoly_region_bytes(n, region.size());
+                if (!gate.acquire(reserve)) return;
+                try {
+                    optimize_phase_polynomial(clifford, region, strategy);
+                } catch (...) {
+                    gate.release(reserve);
+                    gate.fail();
+                    return;
+                }
+                gate.release(reserve);
+            }
+        }
+    };
+
+    auto const n_workers = std::min(num_threads, units.size());
+    std::vector<std::thread> pool;
+    pool.reserve(n_workers - 1);
+    for (size_t t = 1; t < n_workers; ++t) pool.emplace_back(worker);
+    worker();
+    for (auto& th : pool) th.join();
+
+    if (gate.failed()) return false;
+    remove_identities(tableau);
+    return true;
 }
 
 // matroid partitioning

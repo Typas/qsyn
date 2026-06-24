@@ -401,13 +401,15 @@ size_t predict_peak_bytes(size_t n, size_t s_clifford, size_t m_total, size_t m_
                               + 24 * (2 * n) * (2 * n);
     auto const gadgetize = live_gadgetize / 100 * gadget_alloc_headroom_percent();
 
-    // PHASEPOLY stage (FastTODD, BooleanMatrix::Row = 1 byte/bit): every region runs at the global width
-    // n after gadgetize, so the peak is the largest region's L-matrices + augmented + phase-poly matrix.
-    auto const c_n_2     = n * (n - 1) / 2;
-    auto const phasepoly = 2 * m_region * (n + c_n_2) + m_region * m_region + n * m_region;
-
     // Structural growth only; the planner adds the live plan-time RSS as the baseline floor.
-    return std::max(gadgetize, phasepoly);
+    return std::max(gadgetize, phasepoly_region_bytes(n, m_region));
+}
+
+size_t phasepoly_region_bytes(size_t n, size_t m_region) {
+    // PHASEPOLY stage (FastTODD, BooleanMatrix::Row = 1 byte/bit): a region runs at the global width n,
+    // so its peak is the region's L-matrices + augmented + phase-poly matrix.
+    auto const c_n_2 = n * (n - 1) / 2;
+    return 2 * m_region * (n + c_n_2) + m_region * m_region + n * m_region;
 }
 
 namespace {
