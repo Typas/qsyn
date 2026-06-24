@@ -373,17 +373,19 @@ constexpr size_t kPauliRotationBytes = 48;
 // separators+regions), and `out` (assembled from middle).
 constexpr size_t kWidenCopies = 3;
 // The one allocator-dependent knob: real RSS = structural bytes x allocator overhead, which no sizeof
-// captures and which varies by allocator. User-overridable via env QSYN_GADGET_HEADROOM (a percent);
-// default 150 measured on glibc. Re-validate per allocator (jemalloc/tcmalloc/mimalloc/musl) -- an
-// under-value OOMs under predict-only enforcement.
-// FIXME: 150 is the glibc (best-case) value -- a cross-allocator sweep showed mimalloc3 needs ~+18% and
-// the spread grows with scale; the cross-allocator / large-budget default policy is untested, unresolved.
+// captures and which varies by allocator. User-overridable via env QSYN_GADGET_HEADROOM (a percent).
+// Default 175: under the threaded phasepoly executor, glibc retains freed gadgetize arenas, so the
+// gadgetize and phasepoly stages sum in RSS instead of max(), and a lower value can leave predicted <
+// actual (unsafe) at high thread counts. 175 restores predicted >= actual on glibc; jemalloc/mimalloc
+// are safe lower. The glibc margin compresses as the budget grows, so very large budgets should pin a
+// higher QSYN_GADGET_HEADROOM; a malloc_trim() at the gadgetize->phasepoly boundary (return arenas,
+// break the stage-sum) is the structural alternative to padding -- deferred.
 size_t gadget_alloc_headroom_percent() {
     static size_t const pct = []() -> size_t {
         if (char const* e = std::getenv("QSYN_GADGET_HEADROOM")) {
             if (auto const v = std::strtoul(e, nullptr, 10); v > 0) return static_cast<size_t>(v);
         }
-        return 150;
+        return 175;
     }();
     return pct;
 }
