@@ -79,7 +79,7 @@ std::optional<DepGraph> from_xag_cuts(XAG const& xag, std::map<XAGNodeID, XAGCut
     };
 
     std::vector<XAGNodeID> optimal_cone_tips = optimal_cut |
-                                               views::filter([&is_input](auto const entry) { return !is_input(entry.first); }) |
+                                               views::filter([&is_input](auto const& entry) { return !is_input(entry.first); }) |
                                                views::keys |
                                                tl::to<std::vector>();
 
@@ -239,7 +239,7 @@ void test_pebble(const size_t num_pebbles, std::istream& input) {
                                                      std::views::values |
                                                      std::views::transform([](const Node& node) {
                                                  return node.dependencies.size();
-                                             }));
+                                                     }));
     const size_t real_num_pebbles = sanitize_num_pebbles(num_pebbles, num_nodes, max_deps);
 
     spdlog::debug("N = {}, P = {}", num_nodes, real_num_pebbles);
