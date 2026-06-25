@@ -488,8 +488,9 @@ bool ArgumentParser::_parse_positional_arguments(TokensSpan tokens, std::vector<
                 fmt::println(stderr, "Error: missing argument \"{}\": expected {}{} arguments!!",
                              arg.get_name(), (lower < upper ? "at least " : ""), lower);
                 return false;
-            } else
+            } else {
                 continue;
+            }
         }
 
         if (!arg.take_action(parse_range)) return false;
