@@ -7,7 +7,6 @@
 #include "tableau/optimize/adaptive_gadget.hpp"
 
 #include <spdlog/spdlog.h>
-
 #include <unistd.h>
 
 #include <algorithm>
@@ -258,7 +257,7 @@ bool gadgetize_internal_hadamards(Tableau& tableau) {
     if (k == 0) return true;  // no internal Hadamards
 
     // Widen to n + k idle ancillae and gadgetize+merge the whole interior into one region.
-    Tableau ext = tableau.extended_with_ancillae(k);
+    Tableau ext         = tableau.extended_with_ancillae(k);
     size_t next_ancilla = n;
     auto const span     = gadgetize_span(ext, *first_rot, *last_rot, next_ancilla);
 
@@ -385,8 +384,9 @@ bool gadgetize_internal_hadamards(Tableau& tableau, std::span<size_t const> sele
 size_t current_rss_bytes() {
     std::FILE* f = std::fopen("/proc/self/statm", "r");
     if (f == nullptr) return 0;
-    unsigned long sz = 0;
+    unsigned long sz  = 0;
     unsigned long rss = 0;
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-vararg) -- fscanf is the standard interface for /proc/self/statm; no C++ alternative without manual string parsing
     auto const matched = std::fscanf(f, "%lu %lu", &sz, &rss);
     std::fclose(f);
     return matched == 2 ? static_cast<size_t>(rss) * static_cast<size_t>(sysconf(_SC_PAGESIZE)) : 0;
@@ -445,9 +445,8 @@ size_t predict_peak_bytes(size_t n, size_t s_clifford, size_t m_total, size_t m_
     // GADGETIZE stage: kWidenCopies resident copies of the width-n tableau (s_clifford StabilizerTableaux
     // + m_total rotations) + synthesize() temporaries (CliffordOperatorString O((2n)^2) x 24 B), all
     // inflated by allocator fragmentation.
-    auto const live_gadgetize = kWidenCopies * (s_clifford * stab_bytes + m_total * rot_bytes)
-                              + 24 * (2 * n) * (2 * n);
-    auto const gadgetize = live_gadgetize / 100 * gadget_alloc_headroom_percent();
+    auto const live_gadgetize = kWidenCopies * (s_clifford * stab_bytes + m_total * rot_bytes) + 24 * (2 * n) * (2 * n);
+    auto const gadgetize      = live_gadgetize / 100 * gadget_alloc_headroom_percent();
 
     // Structural growth only; the planner adds the live plan-time RSS as the baseline floor.
     return std::max(gadgetize, phasepoly_region_bytes(n, m_region));
@@ -483,9 +482,9 @@ std::vector<size_t> plan_boundaries(Tableau const& tableau, size_t budget_bytes)
     // The budget itself is the ceiling (cgroup memory.max is the real hard enforcer; no fudge margin).
     // Headroom = budget minus the live resident baseline (QCir DAG + un-widened tableau already loaded);
     // predict_peak_bytes returns the structural GROWTH on top, so a plan fits iff growth <= headroom.
-    auto const ceiling   = budget_bytes;
-    auto const baseline  = current_rss_bytes();
-    auto const base_n    = tableau.n_qubits();
+    auto const ceiling  = budget_bytes;
+    auto const baseline = current_rss_bytes();
+    auto const base_n   = tableau.n_qubits();
 
     // s_clifford = number of StabilizerTableau blocks. extended_with_ancillae widens ALL of them to the
     // global width, so this (fixed) count is the driver of the gadgetize-stage WIDEN cost.
