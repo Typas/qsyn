@@ -262,7 +262,7 @@ void synthesize_clifford_until_h_free(
     StabilizerTableau const& this_clifford,
     PauliRotationTableau& prt,
     StabilizerTableau& next_clifford,
-    size_t iter) {
+    size_t /*iter*/) {
     // synthesize until the H-layer
     // the H-opt synthesis strategy put the H-optimal circuit
     // at the end. however, we want to synthesize them first.
