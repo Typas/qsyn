@@ -52,6 +52,7 @@ bool SubParsers::is_required() const noexcept {
     return _pimpl->required;
 }
 
+SubParsers::MapType& SubParsers::get_subparsers() { return _pimpl->subparsers; }
 SubParsers::MapType const& SubParsers::get_subparsers() const { return _pimpl->subparsers; }
 std::string const& SubParsers::get_help() const { return _pimpl->help; }
 std::string const& SubParsers::get_dest() const { return _pimpl->dest; }
