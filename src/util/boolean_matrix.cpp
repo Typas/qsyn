@@ -9,8 +9,8 @@
 
 #include <cassert>
 #include <cmath>
-#include <cstdlib>
 #include <cstdint>
+#include <cstdlib>
 #include <gsl/util>
 #include <tl/enumerate.hpp>
 #include <unordered_map>
@@ -25,7 +25,7 @@ namespace {
 bool row_add_profile_enabled() {
     static bool const enabled = [] {
         auto const* raw = std::getenv("QSYN_TOHPE_PROFILE");
-        return raw != nullptr && raw[0] == '1';
+        return raw != nullptr && *raw == '1';
     }();
     return enabled;
 }
@@ -331,8 +331,8 @@ size_t BooleanMatrix::filter_duplicate_row_operations() {
     for (size_t ith_row_op = 0; ith_row_op < _row_operations.size(); ith_row_op++) {
         auto& [row_src, row_dest] = _row_operations[ith_row_op];
         auto const first_match    = last_used.contains(row_src) &&
-                                 last_used[row_src].row_idx == row_dest &&
-                                 _row_operations[last_used[row_src].op_idx].first == row_src;  // make sure the destinations are matched
+                                    last_used[row_src].row_idx == row_dest &&
+                                    _row_operations[last_used[row_src].op_idx].first == row_src;  // make sure the destinations are matched
 
         auto const second_match = last_used.contains(row_dest) &&
                                   last_used[row_dest].row_idx == row_src &&
