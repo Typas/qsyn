@@ -122,6 +122,10 @@ public:
         // FIXME - check if the subtableau has the same number of qubits
         _subtableaux.push_back(subtableau);
     }
+    auto push_back(SubTableau&& subtableau) {
+        // FIXME - check if the subtableau has the same number of qubits
+        _subtableaux.push_back(std::move(subtableau));
+    }
 
     template <typename... Args>
     auto emplace_back(Args&&... args) {
