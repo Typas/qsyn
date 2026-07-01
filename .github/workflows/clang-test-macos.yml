@@ -15,6 +15,7 @@ jobs:
         uses: actions/checkout@v7
       - name: Download llvm-clang, parallel and coreutils
         run: |
+          brew untap aws/tap || true  # aws/tap is untrusted; untap to suppress Homebrew warning; ignore if not present
           brew install llvm@18 parallel coreutils
           brew link llvm@18
           echo 'export PATH="$(brew --prefix)/opt/llvm@18/bin:$PATH"' >> /Users/runner/.bash_profile
