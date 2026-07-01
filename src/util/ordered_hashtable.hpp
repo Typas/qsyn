@@ -53,6 +53,7 @@ public:
     template <typename VecIterType>
     class OTableIterator {
         using _itr_val_ref_t = decltype(std::declval<VecIterType>()->value());
+
     public:
         using value_type        = Value;
         using difference_type   = std::ptrdiff_t;

@@ -239,7 +239,7 @@ void test_pebble(const size_t num_pebbles, std::istream& input) {
                                                      std::views::values |
                                                      std::views::transform([](const Node& node) {
                                                  return node.dependencies.size();
-                                                     }));
+                                             }));
     const size_t real_num_pebbles = sanitize_num_pebbles(num_pebbles, num_nodes, max_deps);
 
     spdlog::debug("N = {}, P = {}", num_nodes, real_num_pebbles);
