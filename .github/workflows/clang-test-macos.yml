@@ -17,7 +17,6 @@ jobs:
         run: |
           brew untap aws/tap || true  # aws/tap is untrusted; untap to suppress Homebrew warning; ignore if not present
           brew install llvm@18 parallel coreutils
-          brew link llvm@18
           echo 'export PATH="$(brew --prefix)/opt/llvm@18/bin:$PATH"' >> /Users/runner/.bash_profile
           echo 'export LDFLAGS="-L$(brew --prefix)/opt/llvm@18/lib"' >> /Users/runner/.bash_profile
           echo 'export CPPFLAGS="-I$(brew --prefix)/opt/llvm@18/include"' >> /Users/runner/.bash_profile
